@@ -123,7 +123,50 @@ def patch_for_work_items(text):
     return text.replace(old, new)
 
 
-MATCH_COPY_SWIZZLE_OLD = """        for (uint32_t copyId = laneId; /* mid-break in the loop */; copyId += laneCount)
+MATCH_COPY_OLD = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> dstData,
+                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,
+                              zstdgpu_Sequence seq,
+                              uint32_t dstEnd  //< NOTE(pamartis): this one is passed for safety clamp, could be ignored
+                              )
+{
+    const uint32_t laneCount = WaveGetLaneCount();
+    const uint32_t laneId = WaveGetLaneIndex();
+
+    // When either path could handle the match copy, prefer this one since there is no modulo.
+    ZSTDGPU_BRANCH if (seq.offs >= zstdgpu_MinU32(laneCount, seq.mlen))
+    {
+        uint32_t dstI = dstOfs + laneId;
+        dstOfs += seq.mlen;
+        dstEnd = zstdgpu_MinU32(dstEnd, dstOfs); //< NOTE(pamartis): could skip min
+
+        ZSTDGPU_LOOP for (; dstI < dstEnd; dstI += laneCount)
+        {
+            zstdgpu_TypedStoreU8(dstData, dstI, dstData[dstI - seq.offs]);
+        }
+    }
+    else // 'seq.offs < seq.mlen && seq.offs < laneCount':
+    {
+        uint32_t srcSym = 0;
+        ZSTDGPU_BRANCH if (laneId < seq.offs)
+        {
+            srcSym = dstData[dstOfs + laneId - seq.offs];
+        }
+
+        const uint32_t copyLen = zstdgpu_MinU32(dstEnd - dstOfs, seq.mlen); //< NOTE(pamartis): could skip min
+
+        // NOTE(jweinste): It is undefined what is returned upon reading from an inactive lane via WaveReadLaneAt()
+        // (most current drivers seem to yield 0 for this case).
+        // Hence, we must place the loop exit/break carefully.
+        //
+        // Consider this example:
+        //      "ABC", offs=3, mlen=9 // initial data
+        //      "ABCABCABCABC"        // expected output
+        //
+        //      Say WaveSize = 4:
+        //          Store 0: stores ABCA = swizzle(ABC, {0,1,2,0}).
+        //          Store 1: stores BCAB = swizzle(ABC, {1,2,0,1}).
+        //          Store 2: only lane 0 can be active for the store, but the element it wants (C) is in lane 2.
+        for (uint32_t copyId = laneId; /* mid-break in the loop */; copyId += laneCount)
         {
             //< NOTE(pamartis): We could replace 'mod' operation by Lemire'19 approach and precomputing up to 128 constants..
             const uint32_t swizzled = WaveReadLaneAt(srcSym, copyId % seq.offs);
@@ -133,48 +176,208 @@ MATCH_COPY_SWIZZLE_OLD = """        for (uint32_t copyId = laneId; /* mid-break 
                 break;
             }
             zstdgpu_TypedStoreU8(dstData, dstOfs + copyId, swizzled);
-        }"""
+        }
+        dstOfs += copyLen;
+    }
+}"""
 
-MATCH_COPY_SWIZZLE_NEW = """        const uint32_t copyEnd = ((copyLen + laneCount - 1) / laneCount) * laneCount;
-        // slabitz, plane-aware (pac): in bit-plane data most short-offset matches
-        // are runs of one byte (offset 1: an empty plane). Fill those: lane 0 holds
-        // the byte, read it once, then stores only (no shuffle, no modulo).
-        ZSTDGPU_BRANCH if (seq.offs == 1u)
+MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> dstData,
+                              RWStructuredBuffer<uint32_t> dstData32,
+                              RWStructuredBuffer<uint4> dstData16,
+                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,
+                              zstdgpu_Sequence seq,
+                              uint32_t dstEnd  //< NOTE(pamartis): this one is passed for safety clamp, could be ignored
+                              )
+{
+    const uint32_t laneCount = WaveGetLaneCount();
+    const uint32_t laneId = WaveGetLaneIndex();
+    const uint32_t copyLen = (dstOfs < dstEnd) ? zstdgpu_MinU32(dstEnd - dstOfs, seq.mlen) : 0u;
+
+    // Generic vectorized fill for offset-1 runs (e.g. empty bit-planes in bitshuffle):
+    // one byte load on lane 0, then 16-byte aligned uint4 stores across the interior.
+    ZSTDGPU_BRANCH if (seq.offs == 1u && copyLen > 0u && dstOfs >= 1u)
+    {
+        uint32_t s0 = 0u;
+        if (laneId == 0u)
         {
-            const uint32_t sym = WaveReadLaneFirst(srcSym);
-            for (uint32_t copyId = laneId; copyId < copyLen; copyId += laneCount)
+            s0 = dstData[dstOfs - 1u];
+        }
+        const uint32_t sym = WaveReadLaneFirst(s0);
+        ZSTDGPU_BRANCH if (copyLen >= 32u)
+        {
+            const uint32_t w = (sym & 0xFFu) * 0x01010101u;
+            const uint4 v4 = uint4(w, w, w, w);
+            const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
+            const uint32_t nVecs = (copyLen - head16) >> 4u;
+            const uint32_t vecBase = (dstOfs + head16) >> 4u;
+            const uint32_t tailStart = head16 + (nVecs << 4u);
+            const uint32_t tail16 = copyLen - tailStart;
+            if (laneId < head16)
             {
-                zstdgpu_TypedStoreU8(dstData, dstOfs + copyId, sym);
+                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, sym);
+            }
+            ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
+            {
+                dstData16[vecBase + v] = v4;
+            }
+            if (laneId < tail16)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, sym);
             }
         }
         else
         {
-            const uint32_t copyEndAll = copyEnd;
-            for (uint32_t copyId = laneId; copyId < copyEndAll; copyId += laneCount)
+            if (laneId < copyLen)
             {
-                const uint32_t swizzled = WaveReadLaneAt(srcSym, copyId % seq.offs);
-                if (copyId < copyLen)
-                {
-                    zstdgpu_TypedStoreU8(dstData, dstOfs + copyId, swizzled);
-                }
+                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, sym);
             }
-        }"""
+        }
+        dstOfs += copyLen;
+    }
+    // When either path could handle the match copy, prefer this one since there is no modulo.
+    else ZSTDGPU_BRANCH if (seq.offs >= zstdgpu_MinU32(laneCount, seq.mlen))
+    {
+        // Generic vectorized non-overlapping aligned match copy (e.g. plane-to-plane
+        // repeats where offset P is a multiple of 16 or 4): disjoint src and dst ranges.
+        ZSTDGPU_BRANCH if (seq.offs >= copyLen && dstOfs >= seq.offs && copyLen >= 64u && (seq.offs & 15u) == 0u)
+        {
+            const uint32_t srcOfs = dstOfs - seq.offs;
+            const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
+            const uint32_t nVecs = (copyLen - head16) >> 4u;
+            const uint32_t dstVecBase = (dstOfs + head16) >> 4u;
+            const uint32_t srcVecBase = (srcOfs + head16) >> 4u;
+            const uint32_t tailStart = head16 + (nVecs << 4u);
+            const uint32_t tail16 = copyLen - tailStart;
+            if (laneId < head16)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, dstData[srcOfs + laneId]);
+            }
+            ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
+            {
+                dstData16[dstVecBase + v] = dstData16[srcVecBase + v];
+            }
+            if (laneId < tail16)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
+            }
+            dstOfs += seq.mlen;
+        }
+        else ZSTDGPU_BRANCH if (seq.offs >= copyLen && dstOfs >= seq.offs && copyLen >= 32u && (seq.offs & 3u) == 0u)
+        {
+            const uint32_t srcOfs = dstOfs - seq.offs;
+            const uint32_t head4 = (4u - (dstOfs & 3u)) & 3u;
+            const uint32_t nWords = (copyLen - head4) >> 2u;
+            const uint32_t dstWordBase = (dstOfs + head4) >> 2u;
+            const uint32_t srcWordBase = (srcOfs + head4) >> 2u;
+            const uint32_t tailStart = head4 + (nWords << 2u);
+            const uint32_t tail4 = copyLen - tailStart;
+            if (laneId < head4)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, dstData[srcOfs + laneId]);
+            }
+            ZSTDGPU_LOOP for (uint32_t w = laneId; w < nWords; w += laneCount)
+            {
+                dstData32[dstWordBase + w] = dstData32[srcWordBase + w];
+            }
+            if (laneId < tail4)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
+            }
+            dstOfs += seq.mlen;
+        }
+        else
+        {
+            uint32_t dstI = dstOfs + laneId;
+            dstOfs += seq.mlen;
+            dstEnd = zstdgpu_MinU32(dstEnd, dstOfs); //< NOTE(pamartis): could skip min
+
+            ZSTDGPU_LOOP for (; dstI < dstEnd; dstI += laneCount)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstI, dstData[dstI - seq.offs]);
+            }
+        }
+    }
+    else // '1 < seq.offs < seq.mlen && seq.offs < laneCount':
+    {
+        uint32_t srcSym = 0;
+        ZSTDGPU_BRANCH if (laneId < seq.offs)
+        {
+            srcSym = dstData[dstOfs + laneId - seq.offs];
+        }
+
+        // Pad the loop to a uniform trip count so WaveReadLaneAt always runs
+        // with the whole wave converged (avoids pre-Volta/CUDA mask deadlock).
+        const uint32_t copyEnd = ((copyLen + laneCount - 1) / laneCount) * laneCount;
+        for (uint32_t copyId = laneId; copyId < copyEnd; copyId += laneCount)
+        {
+            const uint32_t swizzled = WaveReadLaneAt(srcSym, copyId % seq.offs);
+            if (copyId < copyLen)
+            {
+                zstdgpu_TypedStoreU8(dstData, dstOfs + copyId, swizzled);
+            }
+        }
+        dstOfs += copyLen;
+    }
+}"""
+
+# Exact-once patches to wire inoutUnCompressedFramesData32/16 through ExecuteSequences into MatchCopy.
+EXEC_VEC_PATCHES = [
+    (MATCH_COPY_OLD, MATCH_COPY_NEW),
+    ("static void zstdgpu_ExecuteSequence_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
+     "                                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
+     "static void zstdgpu_ExecuteSequence_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
+     "                                              RWStructuredBuffer<uint32_t> dstData32,\n"
+     "                                              RWStructuredBuffer<uint4> dstData16,\n"
+     "                                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,"),
+    ("        zstdgpu_MatchCopy(dstData, dstOfs, seq, dstEnd);",
+     "        zstdgpu_MatchCopy(dstData, dstData32, dstData16, dstOfs, seq, dstEnd);"),
+    ("static void zstdgpu_ExecuteSequencePair_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
+     "                                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
+     "static void zstdgpu_ExecuteSequencePair_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
+     "                                                  RWStructuredBuffer<uint32_t> dstData32,\n"
+     "                                                  RWStructuredBuffer<uint4> dstData16,\n"
+     "                                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,"),
+    ("        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstOfs, litBuf, litOfs, seq0, dstEnd);\n"
+     "        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstOfs, litBuf, litOfs, seq1, dstEnd);",
+     "        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstData32, dstData16, dstOfs, litBuf, litOfs, seq0, dstEnd);\n"
+     "        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstData32, dstData16, dstOfs, litBuf, litOfs, seq1, dstEnd);"),
+    ("            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);",
+     "            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);"),
+    ("            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, dstOfs, litBuf, litOfs, seq, dstEnd);",
+     "            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);"),
+    ("                zstdgpu_MatchCopy(srt.inoutUnCompressedFramesData, blockByteCur, seq, blockByteEnd);",
+     "                zstdgpu_MatchCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, blockByteCur, seq, blockByteEnd);"),
+]
 
 
 def patch_match_copy_swizzle(text):
-    """Uniform the zstdgpu_MatchCopy swizzle loop.
+    """Uniform the swizzle loop and add generic vectorized fills/copies to zstdgpu_MatchCopy."""
+    for idx, (old, new) in enumerate(EXEC_VEC_PATCHES):
+        n = text.count(old)
+        if n != 1:
+            raise SystemExit("EXEC_VEC patch %d: expected 1 match, found %d" % (idx, n))
+        text = text.replace(old, new)
+    return text
 
-    The original `for (copyId = laneId; ; copyId += laneCount) { WaveReadLaneAt(...); if
-    (copyId >= copyLen) break; ... }` has a wave-divergent trip count: lanes leave the loop on
-    different iterations while each still calls WaveReadLaneAt (a warp shuffle). Slang lowers that
-    to `__shfl_sync` with the FULL mask, so the divergent lanes make the mask mismatch the live-set
-    and the warp deadlocks. Pad the loop to a uniform trip count (all lanes iterate the same number
-    of times) and predicate the store, so the shuffle always runs with the whole warp converged.
-    """
-    n = text.count(MATCH_COPY_SWIZZLE_OLD)
+
+def patch_execute_sequences_srt(text):
+    """Add 32-bit and 128-bit views of inoutUnCompressedFramesData to ExecuteSequences_SRT."""
+    old = (
+        "    StructuredBuffer<uint8_t>              inDecompressedLiterals;\n"
+        "    RWStructuredBuffer<uint8_t>              inoutUnCompressedFramesData;\n"
+        "    ZSTDGPU_RO_BUFFER(zstdgpu_Counters)                     inCounters;"
+    )
+    new = (
+        "    StructuredBuffer<uint8_t>              inDecompressedLiterals;\n"
+        "    RWStructuredBuffer<uint8_t>              inoutUnCompressedFramesData;\n"
+        "    RWStructuredBuffer<uint32_t>             inoutUnCompressedFramesData32;\n"
+        "    RWStructuredBuffer<uint4>                inoutUnCompressedFramesData16;\n"
+        "    ZSTDGPU_RO_BUFFER(zstdgpu_Counters)                     inCounters;"
+    )
+    n = text.count(old)
     if n != 1:
-        raise SystemExit("MATCH_COPY_SWIZZLE patch: expected 1 match, found %d" % n)
-    return text.replace(MATCH_COPY_SWIZZLE_OLD, MATCH_COPY_SWIZZLE_NEW)
+        raise SystemExit("ExecuteSequences_SRT patch: expected 1 match, found %d" % n)
+    return text.replace(old, new)
 
 
 def strip_dxc_pragmas(text):
@@ -328,6 +531,9 @@ def main(argv=None):
         if rel == "zstdgpu_shared_structs.h" or rel.startswith("srt_headers/"):
             text = patch_typed_buffer_types(text)
             print("  typed byte/halfword buffers as native elements:", rel)
+            if rel == "srt_headers/zstdgpu_srt_structs.h":
+                text = patch_execute_sequences_srt(text)
+                print("  added u32/uint4 output views to ExecuteSequences_SRT:", rel)
         d.write_text(text)
 
     print("Wrote ported tree to", dst)
