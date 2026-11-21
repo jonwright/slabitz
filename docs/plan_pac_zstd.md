@@ -37,71 +37,85 @@ P (the plane below, P = block elements / 8, equal to `blockBytes / (8 * e)`).
    `zstdgpu_MatchCopy` (latency-bound by byte loads/stores), whereas `off == 1`
    had already been changed to store-only byte fills.
 
-## Implemented change: generic vectorized `zstdgpu_MatchCopy`
+## Implemented changes
 
-Instead of passing a `planeSize` scalar or adding pac-specific branches:
-
-- Added `inoutUnCompressedFramesData32` (`uint32_t`) and
-  `inoutUnCompressedFramesData16` (`uint4`) alias views to
-  `zstdgpu_ExecuteSequences_SRT`, `kernels/ExecuteSequences.slang`, and
-  `src/sbz_chain.c`, routed into `zstdgpu_MatchCopy` through
-  `tools/transform_ds_for_slang.py`.
-- In `zstdgpu_MatchCopy`:
-  - `seq.offs == 1u` with `copyLen >= 32`: lane 0 reads the repeat byte once,
-    then writes unaligned head/tail bytes and 16-byte aligned `uint4` stores across
-    the interior (replaces byte-at-a-time stores).
-  - Non-overlapping aligned matches (`seq.offs >= copyLen`): 16-byte `uint4`
-    loads/stores when `copyLen >= 64` and `(seq.offs & 15) == 0`, or 4-byte
-    `uint32` loads/stores when `copyLen >= 32` and `(seq.offs & 3) == 0`, with
-    byte head/tail handling (disjoint source and destination ranges).
-  - Every other match keeps the existing DS byte loop or uniform-trip-count
-    `< 32` swizzle loop.
-- No extra kernel parameters from the caller, no change to stock-zstd semantics,
-  and works for all zstd inputs (`silicon`/`thaumatin`/`ceo2`, `pac` and `stock`).
+1. **Generic vectorized `zstdgpu_MatchCopy` & `ExecuteSequences` tuning**
+   (`tools/transform_ds_for_slang.py`, `kernels/ExecuteSequences.slang`,
+   `src/sbz_chain.c`, regenerated `src/sbz_kernels_gen.h`):
+   - Bound `inoutUnCompressedFramesData32` (`uint32_t`) and
+     `inoutUnCompressedFramesData16` (`uint4`) alias views to
+     `B_UnCompressedFramesData` inside `ExecuteSequences`.
+   - In `zstdgpu_MatchCopy`:
+     - `seq.offs == 1u` (`copyLen >= 32`): broadcast single-byte L1 read (no
+       wave intrinsic), then unaligned head/tail bytes and 16-byte aligned
+       `uint4` stores across the interior.
+     - Non-overlapping aligned matches (`seq.offs >= copyLen`): 16-byte `uint4`
+       loads/stores when `copyLen >= 64` and `(seq.offs & 15) == 0`, or 4-byte
+       `uint32` loads/stores when `copyLen >= 32` and `(seq.offs & 3) == 0`,
+       with byte head/tail handling.
+   - In `zstdgpu_ExecuteSequence_FusedCopy`: added fused short `seq.offs == 1`
+     fill (`total <= 32`) when `llen + mlen` fits in one wave, avoiding a
+     `dstData` read-after-write stall whenever `llen > 0`.
+   - In `zstdgpu_MemCpy_DstSrc`: vectorized literal copies (`copyLen >= 32`)
+     with 32-bit coalesced `dstData32` word stores.
+2. **Huffman literals tuning** (`tools/transform_ds_for_slang.py`,
+   `kernels/InitHuffmanTableAndDecompressLiterals.slang`):
+   - Overlapped `GS_PreInit` (322 dwords, dead before table expansion) with
+     `GS_HuffmanTable` (1024 dwords), shrinking workgroup LDS from 1614 to 1292
+     dwords (6456 -> 5168 bytes).
+   - Packed symbol bit length `bits` into `GS_CodeAndSymbol` bits 16..23 so
+     table expansion reads `[0, r1)` in O(1) and handles `[r1, codeTableSize)`
+     with 1 binary search per state pair instead of 4.
 
 ## Measurements (GTX 1050 Ti sm_61, 248 kB blocks, 4 frames/call)
 
 Verified all 24 runs (12 cases x `{pac, stock}`) byte-exact (648,854,592 bytes
-compared in `bench/pac_matrix.py`). `SLABITZ_PROFILE=1` on `silicon_u32` (4
-frames/call):
+compared in `bench/pac_matrix.py`).
 
-- `silicon_u32_mask0` (`off=1` 99.7%): `ExecuteSequences` **1313.5 -> 841.6 us** (1.56x)
-- `silicon_u32_maskmax-1` (`off=P` 94.6%): `ExecuteSequences` **6623.5 -> 1776.0 us** (**3.73x**)
+Per-kernel `SLABITZ_PROFILE=1` (us/call, 4 frames/call; initial -> Commit 1 -> Commit 2):
 
-Wall time per frame (ms/fr and GB/s) before -> after:
+- `silicon_u32_mask0` (`pac raw=0`): `ExecuteSequences` **1313.5 -> 841.6** (Commit 1)
+- `silicon_u32_maskmax-1` (`pac raw=0`): `ExecuteSequences` **6623.5 -> 1776.0** (Commit 1)
+- `ceo2_u32_maskmax-1` (`pac raw=0`): `Literals` **2812.2 -> 2208.1 us** (-21.5%), `ExecuteSequences` **2855.1 -> 2608.4 us** (-8.6%)
+- `ceo2_u32_maskmax-1` (`pac raw=10`): `Literals` **62.2 -> 54.2 us** (-12.9%), `ExecuteSequences` **2711.4 -> 2472.2 us** (-8.8%)
+- `ceo2_u32_maskmax-1` (`stock`): `Literals` **6255.9 -> 4748.3 us** (-24.1%), `ExecuteSequences` **6322.7 -> 5666.1 us** (-10.4%)
+- `thaumatin_u32_maskmax-1` (`pac raw=0`): `Literals` **2723.3 -> 2117.6 us** (-22.2%), `ExecuteSequences` **9138.2 -> 8573.5 us** (-6.2%)
+- `thaumatin_u32_maskmax-1` (`stock`): `Literals` **1126.5 -> 858.6 us** (-23.8%)
 
-| Case | Codec | Ratio | Before (ms/fr, GB/s) | After (ms/fr, GB/s) |
-|---|---|---:|---:|---:|
-| `silicon_u16_mask0` | pac | 274.87 | 0.62 (14.48) | 0.64 (14.05) |
-| `silicon_u16_mask0` | stock | 207.55 | 0.82 (10.85) | 0.85 (10.50) |
-| `silicon_u16_maskmax-1` | pac | 171.39 | 1.36 (6.57) | **0.83 (10.76)** |
-| `silicon_u16_maskmax-1` | stock | 159.64 | 1.43 (6.23) | 1.38 (6.47) |
-| `silicon_u32_mask0` | pac | 449.95 | 0.90 (19.81) | **0.85 (21.08)** |
-| `silicon_u32_mask0` | stock | 389.57 | 1.36 (13.18) | 1.40 (12.80) |
-| `silicon_u32_maskmax-1` | pac | 295.91 | 2.32 (7.71) | **1.23 (14.49)** |
-| `silicon_u32_maskmax-1` | stock | 238.47 | 2.47 (7.23) | 2.46 (7.27) |
-| `thaumatin_u16_mask0` | pac | 74.35 | 3.09 (11.71) | **2.92 (12.40)** |
-| `thaumatin_u16_mask0` | stock | 59.64 | 3.56 (10.18) | 3.53 (10.24) |
-| `thaumatin_u16_maskmax-1` | pac | 66.41 | 5.37 (6.74) | **3.59 (10.08)** |
-| `thaumatin_u16_maskmax-1` | stock | 49.08 | 5.55 (6.53) | 5.49 (6.59) |
-| `thaumatin_u32_mask0` | pac | 139.59 | 4.42 (16.38) | **4.30 (16.84)** |
-| `thaumatin_u32_mask0` | stock | 116.59 | 5.30 (13.65) | 5.28 (13.70) |
-| `thaumatin_u32_maskmax-1` | pac | 124.86 | 9.28 (7.80) | **5.80 (12.49)** |
-| `thaumatin_u32_maskmax-1` | stock | 84.24 | 9.46 (7.65) | 9.46 (7.65) |
-| `ceo2_u16_mask0` | pac | 2.57 | 2.34 (3.82) | **2.28 (3.92)** |
-| `ceo2_u16_mask0` | stock | 2.44 | 3.37 (2.66) | 3.32 (2.69) |
-| `ceo2_u16_maskmax-1` | pac | 2.55 | 2.76 (3.24) | **2.51 (3.56)** |
-| `ceo2_u16_maskmax-1` | stock | 2.43 | 3.53 (2.53) | 3.51 (2.55) |
-| `ceo2_u32_mask0` | pac | 5.12 | 2.47 (7.25) | **2.41 (7.42)** |
-| `ceo2_u32_mask0` | stock | 4.89 | 3.83 (4.66) | 3.84 (4.65) |
-| `ceo2_u32_maskmax-1` | pac | 5.08 | 3.59 (4.99) | **2.68 (6.67)** |
-| `ceo2_u32_maskmax-1` | stock | 4.85 | 4.51 (3.97) | 4.54 (3.94) |
+Wall time per frame (ms/fr and GB/s):
+
+| Case | Codec | Ratio | Initial | Commit 1 (`MatchCopy`) | Commit 2 (`Exec` + `Literals`) |
+|---|---|---:|---:|---:|---:|
+| `silicon_u16_mask0` | pac | 274.87 | 0.62 (14.48) | 0.64 (14.05) | **0.59 (15.16)** |
+| `silicon_u16_mask0` | stock | 207.55 | 0.82 (10.85) | 0.85 (10.50) | 0.83 (10.79) |
+| `silicon_u16_maskmax-1` | pac | 171.39 | 1.36 (6.57) | 0.83 (10.76) | **0.80 (11.24)** |
+| `silicon_u16_maskmax-1` | stock | 159.64 | 1.43 (6.23) | 1.38 (6.47) | 1.41 (6.33) |
+| `silicon_u32_mask0` | pac | 449.95 | 0.90 (19.81) | 0.85 (21.08) | 0.87 (20.45) |
+| `silicon_u32_mask0` | stock | 389.57 | 1.36 (13.18) | 1.40 (12.80) | 1.40 (12.79) |
+| `silicon_u32_maskmax-1` | pac | 295.91 | 2.32 (7.71) | 1.23 (14.49) | 1.24 (14.38) |
+| `silicon_u32_maskmax-1` | stock | 238.47 | 2.47 (7.23) | 2.46 (7.27) | 2.49 (7.17) |
+| `thaumatin_u16_mask0` | pac | 74.35 | 3.09 (11.71) | 2.92 (12.40) | **2.69 (13.46)** |
+| `thaumatin_u16_mask0` | stock | 59.64 | 3.56 (10.18) | 3.53 (10.24) | **3.51 (10.30)** |
+| `thaumatin_u16_maskmax-1` | pac | 66.41 | 5.37 (6.74) | 3.59 (10.08) | **3.38 (10.69)** |
+| `thaumatin_u16_maskmax-1` | stock | 49.08 | 5.55 (6.53) | 5.49 (6.59) | 5.55 (6.52) |
+| `thaumatin_u32_mask0` | pac | 139.59 | 4.42 (16.38) | 4.30 (16.84) | **3.99 (18.15)** |
+| `thaumatin_u32_mask0` | stock | 116.59 | 5.30 (13.65) | 5.28 (13.70) | **5.23 (13.85)** |
+| `thaumatin_u32_maskmax-1` | pac | 124.86 | 9.28 (7.80) | 5.80 (12.49) | **5.51 (13.15)** |
+| `thaumatin_u32_maskmax-1` | stock | 84.24 | 9.46 (7.65) | 9.46 (7.65) | 9.50 (7.62) |
+| `ceo2_u16_mask0` | pac | 2.57 | 2.34 (3.82) | 2.28 (3.92) | **2.08 (4.30)** |
+| `ceo2_u16_mask0` | stock | 2.44 | 3.37 (2.66) | 3.32 (2.69) | **3.13 (2.86)** |
+| `ceo2_u16_maskmax-1` | pac | 2.55 | 2.76 (3.24) | 2.51 (3.56) | **2.36 (3.79)** |
+| `ceo2_u16_maskmax-1` | stock | 2.43 | 3.53 (2.53) | 3.51 (2.55) | **3.23 (2.77)** |
+| `ceo2_u32_mask0` | pac | 5.12 | 2.47 (7.25) | 2.41 (7.42) | **2.23 (8.02)** |
+| `ceo2_u32_mask0` | stock | 4.89 | 3.83 (4.66) | 3.84 (4.65) | **3.34 (5.36)** |
+| `ceo2_u32_maskmax-1` | pac | 5.08 | 3.59 (4.99) | 2.68 (6.67) | **2.46 (7.27)** |
+| `ceo2_u32_maskmax-1` | stock | 4.85 | 4.51 (3.97) | 4.54 (3.94) | **4.01 (4.46)** |
 
 ## Verification
 
-- `third_party/slang/bin/slangc kernels/ExecuteSequences.slang -target spirv` and `-target metal` both compile with exit code 0.
+- `third_party/slang/bin/slangc` compiles both `kernels/ExecuteSequences.slang` and `kernels/InitHuffmanTableAndDecompressLiterals.slang` for `-target spirv` and `-target metal` with exit code 0.
 - `tests/run_bshuf_chain.py` now also tests `$SLABITZ_EXAMPLES/silicon_u16_zstd2_256k.h5` (143,072,512 B compared) and `ceo2_u32_zstd2_256k.h5` (286,145,024 B compared) when present (skips with a notice otherwise).
-- Passed after final kernel/lib edits (`CUDA_ARCH=sm_61`): `run_kernel_id.py`, `run_host_walk.py`, `run_chain_stage01.py`, `run_chain_stage2.py`, `run_chain_frames.py`, `run_bshuf_chain.py`, `run_zstd_async.py`.
+- Passed after final kernel/lib edits (`CUDA_ARCH=sm_61`, kernel ID `bdf608e50497a7ca`): `run_kernel_id.py`, `run_host_walk.py`, `run_chain_stage01.py`, `run_chain_stage2.py`, `run_chain_frames.py`, `run_bshuf_chain.py`, `run_zstd_async.py`.
 
 ## Out of scope
 

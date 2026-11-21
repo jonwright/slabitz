@@ -191,18 +191,14 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
 {
     const uint32_t laneCount = WaveGetLaneCount();
     const uint32_t laneId = WaveGetLaneIndex();
-    const uint32_t copyLen = (dstOfs < dstEnd) ? zstdgpu_MinU32(dstEnd - dstOfs, seq.mlen) : 0u;
+    const uint32_t copyLen = zstdgpu_MinU32(dstEnd - zstdgpu_MinU32(dstOfs, dstEnd), seq.mlen);
+    const bool isOff1 = (seq.offs == 1u) & (copyLen > 0u) & (dstOfs >= 1u);
 
     // Generic vectorized fill for offset-1 runs (e.g. empty bit-planes in bitshuffle):
-    // one byte load on lane 0, then 16-byte aligned uint4 stores across the interior.
-    ZSTDGPU_BRANCH if (seq.offs == 1u && copyLen > 0u && dstOfs >= 1u)
+    // broadcast the single byte read from L1 (no wave intrinsic), then 16-byte aligned uint4 stores.
+    ZSTDGPU_BRANCH if (isOff1)
     {
-        uint32_t s0 = 0u;
-        if (laneId == 0u)
-        {
-            s0 = dstData[dstOfs - 1u];
-        }
-        const uint32_t sym = WaveReadLaneFirst(s0);
+        const uint32_t sym = dstData[dstOfs - 1u];
         ZSTDGPU_BRANCH if (copyLen >= 32u)
         {
             const uint32_t w = (sym & 0xFFu) * 0x01010101u;
@@ -239,7 +235,8 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
     {
         // Generic vectorized non-overlapping aligned match copy (e.g. plane-to-plane
         // repeats where offset P is a multiple of 16 or 4): disjoint src and dst ranges.
-        ZSTDGPU_BRANCH if (seq.offs >= copyLen && dstOfs >= seq.offs && copyLen >= 64u && (seq.offs & 15u) == 0u)
+        const bool canVec = (seq.offs >= copyLen) & (dstOfs >= seq.offs);
+        ZSTDGPU_BRANCH if (canVec && copyLen >= 64u && (seq.offs & 15u) == 0u)
         {
             const uint32_t srcOfs = dstOfs - seq.offs;
             const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
@@ -262,7 +259,7 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
             }
             dstOfs += seq.mlen;
         }
-        else ZSTDGPU_BRANCH if (seq.offs >= copyLen && dstOfs >= seq.offs && copyLen >= 32u && (seq.offs & 3u) == 0u)
+        else ZSTDGPU_BRANCH if (canVec && copyLen >= 32u && (seq.offs & 3u) == 0u)
         {
             const uint32_t srcOfs = dstOfs - seq.offs;
             const uint32_t head4 = (4u - (dstOfs & 3u)) & 3u;
@@ -320,17 +317,110 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
     }
 }"""
 
-# Exact-once patches to wire inoutUnCompressedFramesData32/16 through ExecuteSequences into MatchCopy.
+MEMCPY_DST_SRC_OLD = """static void zstdgpu_MemCpy_DstSrc(RWStructuredBuffer<uint8_t> dstData,
+                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,
+                                  StructuredBuffer<uint8_t> srcData,
+                                  ZSTDGPU_PARAM_INOUT(uint32_t) srcOfs,
+                                  uint32_t srcCnt,
+                                  uint32_t dstEnd //< NOTE(pamartis): this one is passed for safety clamp, could be ignored
+                                  )
+{
+    uint32_t dstI = dstOfs + WaveGetLaneIndex();
+    uint32_t srcI = srcOfs + WaveGetLaneIndex();
+
+    dstOfs += srcCnt;
+    srcOfs += srcCnt;
+    dstEnd = zstdgpu_MinU32(dstEnd, dstOfs);
+
+    ZSTDGPU_LOOP for (; dstI < dstEnd; dstI += WaveGetLaneCount(), srcI += WaveGetLaneCount())
+    {
+        zstdgpu_TypedStoreU8(dstData, dstI, srcData[srcI]);
+    }
+}"""
+
+MEMCPY_DST_SRC_NEW = """static void zstdgpu_MemCpy_DstSrc(RWStructuredBuffer<uint8_t> dstData,
+                                  RWStructuredBuffer<uint32_t> dstData32,
+                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,
+                                  StructuredBuffer<uint8_t> srcData,
+                                  ZSTDGPU_PARAM_INOUT(uint32_t) srcOfs,
+                                  uint32_t srcCnt,
+                                  uint32_t dstEnd //< NOTE(pamartis): this one is passed for safety clamp, could be ignored
+                                  )
+{
+    const uint32_t laneCount = WaveGetLaneCount();
+    const uint32_t laneId = WaveGetLaneIndex();
+    const uint32_t copyLen = zstdgpu_MinU32(dstEnd - zstdgpu_MinU32(dstOfs, dstEnd), srcCnt);
+
+    ZSTDGPU_BRANCH if (copyLen >= 32u)
+    {
+        const uint32_t head4 = (4u - (dstOfs & 3u)) & 3u;
+        const uint32_t nWords = (copyLen - head4) >> 2u;
+        const uint32_t dstWordBase = (dstOfs + head4) >> 2u;
+        const uint32_t srcAligned = srcOfs + head4;
+        const uint32_t tailStart = head4 + (nWords << 2u);
+        const uint32_t tail4 = copyLen - tailStart;
+        if (laneId < head4)
+        {
+            zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, srcData[srcOfs + laneId]);
+        }
+        ZSTDGPU_LOOP for (uint32_t w = laneId; w < nWords; w += laneCount)
+        {
+            const uint32_t s = srcAligned + (w << 2u);
+            const uint32_t v = uint32_t(srcData[s])
+                             | (uint32_t(srcData[s + 1u]) << 8u)
+                             | (uint32_t(srcData[s + 2u]) << 16u)
+                             | (uint32_t(srcData[s + 3u]) << 24u);
+            dstData32[dstWordBase + w] = v;
+        }
+        if (laneId < tail4)
+        {
+            zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, srcData[srcOfs + tailStart + laneId]);
+        }
+    }
+    else
+    {
+        if (laneId < copyLen)
+        {
+            zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, srcData[srcOfs + laneId]);
+        }
+    }
+    dstOfs += srcCnt;
+    srcOfs += srcCnt;
+}"""
+
+# Exact-once patches to wire inoutUnCompressedFramesData32/16 through ExecuteSequences into MatchCopy & MemCpy_DstSrc.
 EXEC_VEC_PATCHES = [
     (MATCH_COPY_OLD, MATCH_COPY_NEW),
+    (MEMCPY_DST_SRC_OLD, MEMCPY_DST_SRC_NEW),
     ("static void zstdgpu_ExecuteSequence_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
      "                                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
      "static void zstdgpu_ExecuteSequence_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
      "                                              RWStructuredBuffer<uint32_t> dstData32,\n"
      "                                              RWStructuredBuffer<uint4> dstData16,\n"
      "                                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,"),
-    ("        zstdgpu_MatchCopy(dstData, dstOfs, seq, dstEnd);",
-     "        zstdgpu_MatchCopy(dstData, dstData32, dstData16, dstOfs, seq, dstEnd);"),
+    ("    else\n"
+     "    {\n"
+     "        // Fall back to separate literal and match copies when the fused copy conditions are not met.\n"
+     "        zstdgpu_MemCpy_DstSrc(dstData, dstOfs, litBuf, litOfs, seq.llen, dstEnd);\n"
+     "        zstdgpu_MatchCopy(dstData, dstOfs, seq, dstEnd);\n"
+     "    }",
+     "    else ZSTDGPU_BRANCH if (seq.offs == 1u && total <= laneCount && dstOfs + total <= dstEnd && (seq.llen > 0u || dstOfs >= 1u))\n"
+     "    {\n"
+     "        ZSTDGPU_BRANCH if (laneId < total)\n"
+     "        {\n"
+     "            const uint32_t fillSym = (seq.llen > 0u) ? litBuf[litOfs + seq.llen - 1u] : dstData[dstOfs - 1u];\n"
+     "            const uint32_t value = (laneId < seq.llen) ? litBuf[litOfs + laneId] : fillSym;\n"
+     "            zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, value);\n"
+     "        }\n"
+     "        dstOfs += total;\n"
+     "        litOfs += seq.llen;\n"
+     "    }\n"
+     "    else\n"
+     "    {\n"
+     "        // Fall back to separate literal and match copies when the fused copy conditions are not met.\n"
+     "        zstdgpu_MemCpy_DstSrc(dstData, dstData32, dstOfs, litBuf, litOfs, seq.llen, dstEnd);\n"
+     "        zstdgpu_MatchCopy(dstData, dstData32, dstData16, dstOfs, seq, dstEnd);\n"
+     "    }"),
     ("static void zstdgpu_ExecuteSequencePair_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
      "                                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
      "static void zstdgpu_ExecuteSequencePair_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
@@ -345,8 +435,88 @@ EXEC_VEC_PATCHES = [
      "            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);"),
     ("            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, dstOfs, litBuf, litOfs, seq, dstEnd);",
      "            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);"),
+    ("    zstdgpu_MemCpy_DstSrc(srt.inoutUnCompressedFramesData, dstOfs, litBuf, litOfs, litEnd - litOfs, dstEnd);",
+     "    zstdgpu_MemCpy_DstSrc(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, dstOfs, litBuf, litOfs, litEnd - litOfs, dstEnd);"),
     ("                zstdgpu_MatchCopy(srt.inoutUnCompressedFramesData, blockByteCur, seq, blockByteEnd);",
      "                zstdgpu_MatchCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, blockByteCur, seq, blockByteEnd);"),
+    # Huffman table init + literals tuning: overlap GS_PreInit with GS_HuffmanTable (1614 -> 1292 dwords)
+    # and pack bits into GS_CodeAndSymbol bits 16..23 so Expand Huffman Table skips 3/4 binary searches.
+    ("        const uint32_t weightIdAndCodePacked = (weightId << 24) | (code & 0x00ffffffu);",
+     "        const uint32_t weightIdAndCodePacked = (weightId << 24) | ((bits & 0xffu) << 16) | (code & 0x0000ffffu);"),
+    ("#define ZSTDGPU_INIT_HUFFMAN_TABLE_AND_DECOMPRESS_LITERALS_LDS(base, size)          \\\n"
+     "    ZSTDGPU_LDS_SIZE(size)                                                          \\\n"
+     "    ZSTDGPU_LDS_BASE(base)                                                          \\\n"
+     "    ZSTDGPU_LDS_REGION(CodeAndSymbol   , kzstdgpu_MaxCount_HuffmanWeights)          \\\n"
+     "    ZSTDGPU_LDS_REGION(PreInit         , kzstdgpu_PreInitHuffmanTable_LdsSize)      \\\n"
+     "    ZSTDGPU_LDS_REGION(RankIndex       , kzstdgpu_MaxCount_HuffmanWeightRanks)      \\\n"
+     "    ZSTDGPU_LDS_REGION(HuffmanTable    , 1u << (kzstdgpu_MaxCount_HuffmanWeightBits - 1u))",
+     "#define ZSTDGPU_INIT_HUFFMAN_TABLE_AND_DECOMPRESS_LITERALS_LDS(base, size)          \\\n"
+     "    ZSTDGPU_LDS_SIZE(size)                                                          \\\n"
+     "    ZSTDGPU_LDS_BASE(base)                                                          \\\n"
+     "    ZSTDGPU_LDS_REGION(CodeAndSymbol   , kzstdgpu_MaxCount_HuffmanWeights)          \\\n"
+     "    ZSTDGPU_LDS_REGION(RankIndex       , kzstdgpu_MaxCount_HuffmanWeightRanks)      \\\n"
+     "    ZSTDGPU_LDS_REGION(HuffmanTable    , 1u << (kzstdgpu_MaxCount_HuffmanWeightBits - 1u))"),
+    ("        bitsMax,\n"
+     "        codeTableSize,\n"
+     "        GS_PreInit,\n"
+     "        GS_RankIndex,\n"
+     "        GS_CodeAndSymbol",
+     "        bitsMax,\n"
+     "        codeTableSize,\n"
+     "        GS_HuffmanTable,\n"
+     "        GS_RankIndex,\n"
+     "        GS_CodeAndSymbol"),
+    ("    const uint32_t stateCnt = zstdgpu_LdsLoadU32(GS_RankIndex + bitsMax);\n"
+     "    const uint32_t statePairCnt = stateCnt >> 1u;\n"
+     "\n"
+     "    // Expand Huffman Table\n"
+     "    ZSTDGPU_FOR_WORK_ITEMS(statePairId, statePairCnt, threadId, tgSize)\n"
+     "    {\n"
+     "        const uint32_t stateId0 = statePairId << 1u;\n"
+     "        const uint32_t stateId1 = stateId0 + 1u;\n"
+     "\n"
+     "        const uint32_t symbolIndex0 = zstdgpu_BinarySearchLds(GS_CodeAndSymbol, 0, codeTableSize, stateId0, 0x00ffffffu);\n"
+     "        const uint32_t symbolIndex1 = zstdgpu_BinarySearchLds(GS_CodeAndSymbol, 0, codeTableSize, stateId1, 0x00ffffffu);\n"
+     "\n"
+     "        const uint32_t bitcntIndex0 = zstdgpu_BinarySearchLds(GS_RankIndex, 0, bitsMax + 1, stateId0, 0xffffffffu);\n"
+     "        const uint32_t bitcntIndex1 = zstdgpu_BinarySearchLds(GS_RankIndex, 0, bitsMax + 1, stateId1, 0xffffffffu);\n"
+     "\n"
+     "        const uint32_t symbol0 = zstdgpu_LdsLoadU32(GS_CodeAndSymbol + symbolIndex0) >> 24;\n"
+     "        const uint32_t symbol1 = zstdgpu_LdsLoadU32(GS_CodeAndSymbol + symbolIndex1) >> 24;\n"
+     "\n"
+     "        const uint32_t bitcnt0 = bitsMax - bitcntIndex0;\n"
+     "        const uint32_t bitcnt1 = bitsMax - bitcntIndex1;\n"
+     "\n"
+     "        const uint32_t symbolAndBitcnt0 = (symbol0 << 8) | bitcnt0;\n"
+     "        const uint32_t symbolAndBitcnt1 = (symbol1 << 8) | bitcnt1;\n"
+     "\n"
+     "        zstdgpu_LdsStoreU32(GS_HuffmanTable + statePairId, (symbolAndBitcnt1 << 16) | symbolAndBitcnt0);\n"
+     "    }",
+     "    const uint32_t stateCnt = zstdgpu_LdsLoadU32(GS_RankIndex + bitsMax);\n"
+     "    const uint32_t statePairCnt = stateCnt >> 1u;\n"
+     "    const uint32_t r1 = (bitsMax >= 1u) ? zstdgpu_LdsLoadU32(GS_RankIndex + 1u) : stateCnt;\n"
+     "\n"
+     "    // Expand Huffman Table: symbols with bits == bitsMax sit 1:1 in [0, r1);\n"
+     "    // symbols with bits < bitsMax span >= 2 even-aligned slots so statePairId shares one symbol/bitcnt.\n"
+     "    ZSTDGPU_FOR_WORK_ITEMS(statePairId, statePairCnt, threadId, tgSize)\n"
+     "    {\n"
+     "        const uint32_t stateId0 = statePairId << 1u;\n"
+     "        if (stateId0 < r1)\n"
+     "        {\n"
+     "            const uint32_t symbol0 = zstdgpu_LdsLoadU32(GS_CodeAndSymbol + stateId0) >> 24;\n"
+     "            const uint32_t symbol1 = zstdgpu_LdsLoadU32(GS_CodeAndSymbol + stateId0 + 1u) >> 24;\n"
+     "            const uint32_t sb0 = (symbol0 << 8) | bitsMax;\n"
+     "            const uint32_t sb1 = (symbol1 << 8) | bitsMax;\n"
+     "            zstdgpu_LdsStoreU32(GS_HuffmanTable + statePairId, (sb1 << 16) | sb0);\n"
+     "        }\n"
+     "        else\n"
+     "        {\n"
+     "            const uint32_t idx = zstdgpu_BinarySearchLds(GS_CodeAndSymbol, r1, codeTableSize - r1, stateId0, 0x0000ffffu);\n"
+     "            const uint32_t entry = zstdgpu_LdsLoadU32(GS_CodeAndSymbol + idx);\n"
+     "            const uint32_t sb = ((entry >> 24) << 8) | ((entry >> 16) & 0xffu);\n"
+     "            zstdgpu_LdsStoreU32(GS_HuffmanTable + statePairId, (sb << 16) | sb);\n"
+     "        }\n"
+     "    }"),
 ]
 
 
