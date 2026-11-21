@@ -1,0 +1,34 @@
+# Git
+*.pyc
+__pycache__/
+.venv/
+venv/
+
+# Toolchain (vendored Slang compiler) - large binaries, fetch locally
+third_party/slang
+
+# Build outputs
+build/
+*.cubin
+*.ptx
+*.cu
+!kernels/*.cu.disabled
+fatbin/
+*.fatbin
+.cache/
+
+# Python packaging
+*.egg-info/
+dist/
+
+# Benchmark outputs (numbers change; regenerate with bench/run_all.py)
+bench/results.csv
+bench/setup.json
+bench/run.log
+
+# pixi environment (pixi.lock is committed)
+.pixi/
+.ipynb_checkpoints/
+
+# Local pixi workspace / example data symlink (maintainer layout; never committed)
+/workspace

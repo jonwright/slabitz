@@ -1,0 +1,177 @@
+// Bitshuffle transpose: the register core shared by the unfused BitUnshuffleWarp
+// entry and (Phase 3 step 2) the fused Lz4DecodeUnshuffle entry. Slang port of the
+// former kernels/cuda/BitUnshuffleWarp.cu transpose32, generalised from
+// bslz4_to_sparse-dev src/cuda/shuffle_warp.cuh.
+//
+// Layout: a block of N elements (N % 32 == 0) of e bytes each is 8*e bit planes.
+// Plane p is N/8 bytes; word g of plane p (uint32) holds bits of elements
+// [32g, 32g+32): bit m of word (p,g) == bit p of element (32g+m). A cycle of
+// transpose32 over the 8*e plane words of one group yields the group's 32 elements.
+//
+// The plane words come from an IPlaneSource: GlobalPlanes (the uint32 view of the
+// decoded buffer, with a byte fallback when the block is not 4-byte aligned) for
+// the unfused path, or TilePlanes (a file-scope groupshared tile, always aligned)
+// for the fused path. The per-lane step loads 8*e plane words of one 32-element
+// group, transposes them, packs the 32 elements, and stores them to the global
+// BshufOutput (uint4 / uint32 / bytes by alignment).
+//
+// This is an include (stage-function) file, not an entry point: KERNEL_MAP in
+// tools/build_all.py does not list it.
+#ifndef LZ4_FUSED_MAX_BLOCK
+#define LZ4_FUSED_MAX_BLOCK 8192u
+#endif
+
+#define BU_WARPS 8u
+
+// One step of the 32x32 bit transpose (LSB first), J = 16, 8, 4, 2, 1. The shift and
+// the mask M are compile-time per step, so every index below is a constant after
+// unrolling and the array stays in registers.
+// Pairs (k, k+J) with (k & J) == 0: t = ((a[k] >> J) ^ a[k+J]) & M; a[k+J] ^= t; a[k] ^= t << J.
+void bu_transpose_step<let J : int>(inout uint32_t a[32], uint32_t M)
+{
+    [unroll]
+    for (int k = 0; k < 32; k++)
+    {
+        if ((k & J) == 0)
+        {
+            const uint32_t t = ((a[k] >> uint32_t(J)) ^ a[k + J]) & M;
+            a[k + J] ^= t;
+            a[k] ^= (t << uint32_t(J));
+        }
+    }
+}
+
+// 32x32 bit transpose: afterwards bit r of a[c] == old bit c of a[r].
+void bu_transpose32(inout uint32_t a[32])
+{
+    bu_transpose_step<16>(a, 0x0000FFFFu);
+    bu_transpose_step<8>(a, 0x00FF00FFu);
+    bu_transpose_step<4>(a, 0x0F0F0F0Fu);
+    bu_transpose_step<2>(a, 0x33333333u);
+    bu_transpose_step<1>(a, 0x55555555u);
+}
+
+// A source of the 8*e plane words of a 32-element group: word(byteOffset) is the
+// uint32 at byteOffset in the (bit-transposed) decoded block.
+interface IPlaneSource
+{
+    uint32_t word(uint32_t byteOffset);
+};
+
+// Global-memory source: the uint32 view of the decoded buffer, with a byte
+// fallback when the block's byte offset is not 4-byte aligned. Both views bind the
+// same memory.
+struct GlobalPlanes : IPlaneSource
+{
+    StructuredBuffer<uint32_t> buf32;
+    StructuredBuffer<uint8_t> buf8;
+    bool aligned;
+
+    uint32_t word(uint32_t byteOffset)
+    {
+        if (aligned)
+            return buf32[byteOffset >> 2u];
+        return uint32_t(buf8[byteOffset]) | (uint32_t(buf8[byteOffset + 1u]) << 8u) |
+               (uint32_t(buf8[byteOffset + 2u]) << 16u) |
+               (uint32_t(buf8[byteOffset + 3u]) << 24u);
+    }
+};
+
+// The fused path (Lz4DecodeUnshuffle) sets LZ4_ENABLE_TILE to add the groupshared
+// tile the decode writes and this source reads. The unfused entries never enable
+// it, so they allocate no tile.
+#ifdef LZ4_ENABLE_TILE
+#include "sbz_tile.slangh"
+struct TilePlanes : IPlaneSource
+{
+    uint32_t base;
+    uint32_t word(uint32_t byteOffset)
+    {
+        return uint32_t(gLz4Tile[base + byteOffset]) |
+               (uint32_t(gLz4Tile[base + byteOffset + 1u]) << 8u) |
+               (uint32_t(gLz4Tile[base + byteOffset + 2u]) << 16u) |
+               (uint32_t(gLz4Tile[base + byteOffset + 3u]) << 24u);
+    }
+};
+#endif
+
+// Per-lane unshuffle step of one 32-element group: load `nWords` plane words from
+// `planes` starting at byte offset wpByte of the block, transpose them, pack the
+// group's 8*e little-endian words, and store them to BshufOutput at oByte (uint4
+// when 16-byte aligned, uint32 when 4-byte aligned, bytes otherwise).
+void bu_unshuffle_group<S : IPlaneSource>(S planes, uint32_t wpByte, uint32_t g,
+                                          uint32_t blockElems, uint32_t elemSize, uint32_t oByte,
+                                          RWStructuredBuffer<uint8_t> out8,
+                                          RWStructuredBuffer<uint32_t> out32,
+                                          RWStructuredBuffer<uint4> out16)
+{
+    const uint32_t nWords = 8u * elemSize;
+    const uint32_t planeBytes = blockElems / 8u;
+    uint32_t a[32];
+    [unroll]
+    for (int m = 0; m < 32; ++m)
+        a[m] = 0u;
+    [unroll]
+    for (int p = 0; p < 32; ++p)
+    {
+        if (p < int(nWords))
+            a[p] = planes.word(wpByte + uint32_t(p) * planeBytes + g * 4u);
+    }
+    bu_transpose32(a);
+
+    // packed words: r[k] holds bytes 4k..4k+3 of the lane's 32*elemSize output bytes
+    uint32_t r[32];
+    if (elemSize == 4u)
+    {
+        [unroll]
+        for (int k = 0; k < 32; ++k)
+            r[k] = a[k];
+    }
+    else if (elemSize == 2u)
+    {
+        [unroll]
+        for (int k = 0; k < 16; ++k)
+            r[k] = a[2 * k] | (a[2 * k + 1] << 16u);
+    }
+    else
+    {
+        [unroll]
+        for (int k = 0; k < 8; ++k)
+            r[k] = a[4 * k] | (a[4 * k + 1] << 8u) | (a[4 * k + 2] << 16u) | (a[4 * k + 3] << 24u);
+    }
+
+    if ((oByte & 15u) == 0u)
+    {
+        [unroll]
+        for (int k = 0; k < 8; ++k)
+        {
+            if (k * 4 < int(nWords))
+                out16[oByte / 16u + uint32_t(k)] =
+                    uint4(r[4 * k], r[4 * k + 1], r[4 * k + 2], r[4 * k + 3]);
+        }
+    }
+    else if ((oByte & 3u) == 0u)
+    {
+        [unroll]
+        for (int k = 0; k < 32; ++k)
+        {
+            if (k < int(nWords))
+                out32[oByte / 4u + uint32_t(k)] = r[k];
+        }
+    }
+    else
+    {
+        [unroll]
+        for (int k = 0; k < 32; ++k)
+        {
+            if (k < int(nWords))
+            {
+                const uint32_t o = oByte + uint32_t(4 * k);
+                out8[o] = uint8_t(r[k]);
+                out8[o + 1u] = uint8_t(r[k] >> 8u);
+                out8[o + 2u] = uint8_t(r[k] >> 16u);
+                out8[o + 3u] = uint8_t(r[k] >> 24u);
+            }
+        }
+    }
+}

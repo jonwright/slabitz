@@ -1,0 +1,71 @@
+# Build + test environment for slabitz (https://pixi.sh).
+#
+#   pixi run fetch-slangc   # once: download slangc 2026.22 into third_party/slang/
+#   pixi run build          # kernels (Slang -> CUDA -> cubin) + build/libslabitz.so
+#   pixi run test           # main regression tests (needs an NVIDIA GPU + driver)
+#
+# Everything is installed into .pixi/ inside the checkout. The NVIDIA driver
+# (libcuda.so.1) comes from the host and must support CUDA 12.x. Set
+# CUDA_ARCH for your card before building, e.g. CUDA_ARCH=sm_50 for a GTX 960M
+# (default sm_89).
+
+[workspace]
+name = "slabitz"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.12.*"
+numpy = "*"
+zstandard = "*"
+h5py = "*"
+hdf5plugin = "*"
+bitshuffle = "*"
+c-compiler = "*"
+cxx-compiler = "*"
+make = "*"
+patchelf = "*"
+curl = "*"
+# CUDA 12.6 matches the toolkit the kernels were developed with and still
+# targets sm_50 (Maxwell). nvcc's host compiler comes from cxx-compiler.
+cuda-version = "12.6.*"
+cuda-nvcc = "*"
+cuda-nvrtc = "*"
+
+[tasks]
+fetch-slangc = "bash tools/fetch_slangc.sh"
+build-kernels = { cmd = "python3 tools/build_all.py", depends-on = ["fetch-slangc"] }
+build-lib = "make"
+build = { depends-on = ["build-kernels", "build-lib"] }
+# One fatbin per kernel covering sm_35..sm_90 + compute_90 PTX (tools/build_fatbins.py).
+# Needs the kernels built (`pixi run build`) and the sm_35 cubins (`pixi run -e kepler
+# build-sm35`); the result is the per-card directory to point SLABITZ_KERNEL_DIR at.
+build-fatbins = { cmd = "python3 tools/build_fatbins.py", depends-on = ["build-kernels"] }
+test = { cmd = """
+python3 tests/run_kernel_id.py &&
+python3 tests/run_host_walk.py &&
+python3 tests/run_chain_stage01.py &&
+python3 tests/run_chain_stage2.py &&
+python3 tests/run_chain_frames.py &&
+python3 tests/run_bshuf_chain.py &&
+python3 tests/run_bslz4_chain.py &&
+python3 tests/run_zstd_async.py &&
+python3 tests/run_bslz4_device.py &&
+python3 tests/run_unshuffle_slow.py &&
+python3 tests/run_unshuffle_warp.py
+""", depends-on = ["build"] }
+
+# Kepler (sm_35) kernels: CUDA 12 dropped sm_35, so they are compiled with
+# NVRTC from CUDA 11.8 (no host compiler needed). Separate environment because
+# it cannot share a CUDA version with the default one. Needs the .cu files
+# from `pixi run build` first.
+#   pixi run -e kepler build-sm35   -> build/sm_35/<sub>/<name>.cubin
+[feature.kepler.dependencies]
+python = "3.12.*"
+cudatoolkit = "11.8.*"
+
+[feature.kepler.tasks]
+build-sm35 = "python3 tools/build_kubins.py --arch sm_35 --out build/sm_35 --nvrtc $CONDA_PREFIX/lib/libnvrtc.so"
+
+[environments]
+kepler = { features = ["kepler"], no-default-feature = true }

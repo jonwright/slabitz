@@ -1,0 +1,14 @@
+// The fused decode+unshuffle tile: a file-scope groupshared buffer the fused
+// Lz4DecodeUnshuffle kernel uses both as the decode target (TileTarget) and as the
+// plane source for the unshuffle (TilePlanes). Included by kernels/lib/lz4_decode.slangh
+// and kernels/lib/bit_unshuffle.slangh; only defined when the entry sets
+// LZ4_ENABLE_TILE (the fused kernel). The guard keeps a module that includes both
+// headers from declaring it twice.
+//
+// This is an include (stage-function) file, not an entry point.
+#ifndef LZ4_TILE_H
+#define LZ4_TILE_H
+#ifdef LZ4_ENABLE_TILE
+groupshared uint8_t gLz4Tile[LZ4_FUSED_MAX_BLOCK];
+#endif
+#endif // LZ4_TILE_H

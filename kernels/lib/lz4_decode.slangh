@@ -1,0 +1,313 @@
+// bitshuffle-LZ4 block decode: the decode loop shared by the unfused
+// Lz4DecodeBlocks entry and (Phase 3 step 2) the fused Lz4DecodeUnshuffle entry.
+// A Slang port of the LZ4 decoder in bslz4_to_sparse (src/cuda/nvcomp_lz4.cuh),
+// itself an edited copy of NVIDIA's nvCOMP LZ4 decompression kernel.
+//
+// Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//  * Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+//  * Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//  * Neither the name of NVIDIA CORPORATION nor the names of its contributors
+//    may be used to endorse or promote products derived from this software
+//    without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS "AS IS" AND ANY EXPRESS OR
+// IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+// EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
+// INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+// OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+// EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Ported from nvCOMP (src/lowlevel/LZ4CompressionKernels.cu) via bslz4_to_sparse
+// (src/cuda/nvcomp_lz4.cuh, decompressStream). All decode logic keeps the
+// reference's behaviour; the changes are:
+//   * one 32-lane wave per LZ4 block (the reference's DECOMP_THREADS_PER_CHUNK=32).
+//   * the reference's per-wave 256-byte input staging buffer (BufferControl) is
+//     restored: compData is staged into gLz4InBuf in coalesced word loads when the
+//     read cursor nears the end of the window, and tokens, LSIC lengths, literals
+//     and match offsets are then read from shared memory. Reads outside the
+//     window fall back to global (the reference's BufferControl::operator[]).
+//   * the decoded bytes go to the ILz4Target (global inoutDecoded for the unfused
+//     path, a file-scope groupshared tile for the fused path); the unfused path
+//     leaves the separate BitUnshuffle kernels to run over inoutDecoded afterwards,
+//     as for zstd, so a shared decode buffer would only add a copy.
+//   * extra bounds checks (see below) so a corrupt block returns false instead of
+//     reading past its block's input/output range: an LSIC run that overruns the
+//     block, a literal run past the block's input, and a 2-byte offset read at the
+//     end of the block.
+//
+// On a corrupt block the caller (entry point) writes 1 to inoutStatus[chunkIndex]
+// and returns; every lane takes the same branch (all checks are warp-uniform), so
+// no wave barrier is needed to keep the warp coherent, and the host turns any
+// nonzero status into SBZ_ERR_CORRUPT. A failing wave never writes outside its
+// block's output range and never reads outside it.
+//
+// Barriers: AllMemoryBarrierWithGroupSync before the match copy (reads bytes other
+// lanes just wrote), and before and after each gLz4InBuf refill (all lanes done with
+// the old window; the new one visible before any lane reads it). Unlike the
+// reference, a refill can also come from the match-length LSIC, after the literal
+// copy read the window and before the match barrier, hence the barrier before. A
+// group barrier, not a wave one: the group is 32 threads, which is one warp on
+// NVIDIA but 2 or 4 subgroups on GPUs with 16- or 8-wide subgroups (Intel), and it
+// must also order device-memory (not only groupshared) writes. On CUDA it is a
+// __syncthreads over one warp. Every lane reaches it: all control flow here is
+// uniform across the group. No #ifdefs.
+//
+// This is an include (stage-function) file, not an entry point: KERNEL_MAP in
+// tools/build_all.py does not list it.
+
+#define LZ4_LANES 32u // decode cooperatively over 32 lanes, as nvCOMP
+#define LZ4_INPUT_BUFFER_SIZE 256u // 32 lanes x 8 bytes (DECOMP_INPUT_BUFFER_SIZE)
+#define LZ4_PREFETCH_DIST 128u     // = LZ4_INPUT_BUFFER_SIZE / 2
+#ifndef LZ4_FUSED_MAX_BLOCK
+#define LZ4_FUSED_MAX_BLOCK 8192u  // fused tile size (Vulkan groupshared limit)
+#endif
+
+// Per-wave 256-byte input staging window (the reference's BufferControl buffer).
+groupshared uint8_t gLz4InBuf[LZ4_INPUT_BUFFER_SIZE];
+
+// The decoded-bytes sink. The decoder reads back its own output (overlapping
+// matches), so it must expose a byte load as well as a store.
+interface ILz4Target
+{
+    uint8_t load(uint32_t i);
+    void store(uint32_t i, uint8_t v);
+};
+
+// Global-memory target: the unfused path (Lz4DecodeBlocks). Bytes are addressed
+// at `base + i` into a byte view of the same memory the unshuffle kernels read.
+struct GlobalTarget : ILz4Target
+{
+    RWStructuredBuffer<uint8_t> buf;
+    uint32_t base;
+
+    uint8_t load(uint32_t i) { return buf[base + i]; }
+    void store(uint32_t i, uint8_t v) { buf[base + i] = v; }
+};
+
+// The fused path (Lz4DecodeUnshuffle) sets LZ4_ENABLE_TILE to add the groupshared
+// tile the decode writes and the unshuffle then reads. The unfused entry never
+// enables it, so the unfused kernel allocates no tile (its behaviour and timing
+// are unchanged).
+#ifdef LZ4_ENABLE_TILE
+// file-scope groupshared tile (declared once in sbz_tile.slangh): the fused kernel
+// decodes one <=LZ4_FUSED_MAX_BLOCK bit-transposed block here, then unshuffles it
+// straight into BshufOutput.
+#include "sbz_tile.slangh"
+struct TileTarget : ILz4Target
+{
+    uint32_t base;
+    uint8_t load(uint32_t i) { return gLz4Tile[base + i]; }
+    void store(uint32_t i, uint8_t v) { gLz4Tile[base + i] = v; }
+};
+#endif
+
+// Reads one input byte at relative index `rel` (in [0, compSize)); serviced from
+// the shared window when it covers rel, else from compData (the reference's
+// BufferControl::operator[]).
+uint8_t lzInRead(StructuredBuffer<uint8_t> compData, uint32_t compOffs, uint32_t rel,
+                 uint32_t bufRel)
+{
+    if (rel >= bufRel && rel - bufRel < LZ4_INPUT_BUFFER_SIZE)
+        return gLz4InBuf[rel - bufRel];
+    return compData[compOffs + rel];
+}
+
+// Fills the 256-byte window from compData at an 8-byte-aligned base and returns
+// that base (the caller's bufRel). Every lane loads consecutive bytes; bytes past
+// compSize are zeroed. Two group barriers: the first lets every lane finish
+// reading the old window (e.g. a literal copy, when the refill comes from
+// lzReadLSIC before the match barrier), the second publishes the new one.
+uint32_t lzLoadAt(StructuredBuffer<uint8_t> compData, uint32_t compOffs, uint32_t compSize,
+                  uint32_t rel, uint32_t lane)
+{
+    AllMemoryBarrierWithGroupSync();
+    const uint32_t base = rel & ~(uint32_t)7u;
+    for (uint32_t i = lane; i < LZ4_INPUT_BUFFER_SIZE; i += LZ4_LANES)
+    {
+        const uint32_t a = base + i;
+        gLz4InBuf[i] = (a < compSize) ? compData[compOffs + a] : 0u;
+    }
+    AllMemoryBarrierWithGroupSync();
+    return base;
+}
+
+// Reads an LZ4 length (LSIC) at *pIdx: sum bytes until one < 255, advancing
+// *pIdx. Never reads at or past compEnd; a run that reaches compEnd un-ended is
+// corrupt (*ok = false, *num = 0). The block's 255-continuation stream must fit,
+// so a value of 0xff as the last block byte is invalid by construction.
+void lzReadLSIC(StructuredBuffer<uint8_t> compData, uint32_t compOffs, inout uint32_t idx,
+                uint32_t compEnd, inout uint32_t bufRel, uint32_t lane,
+                out uint32_t num, out bool ok)
+{
+    num = 0;
+    ok = true;
+    bool cont = true;
+    while (cont)
+    {
+        if (idx < compEnd)
+        {
+            // keep the window filled (the reference refills at PREFETCH_DIST/2)
+            if (bufRel + LZ4_INPUT_BUFFER_SIZE - idx < LZ4_PREFETCH_DIST)
+                bufRel = lzLoadAt(compData, compOffs, compEnd, idx, lane);
+            const uint8_t b = lzInRead(compData, compOffs, idx, bufRel);
+            ++idx;
+            num += uint32_t(b);
+            cont = (b == 255u);
+        }
+        else
+        {
+            ok = false;
+            cont = false;
+        }
+    }
+}
+
+// Coalesced copy of `length` bytes, stride LZ4_LANES. When src and dst overlap
+// (`dist` is the LZ4 offset; it may be < length) the source index wraps at
+// `dist`, reproducing LZ4's repeated-byte match. Reads the same buffer as it
+// writes; the general case (no-overlap source) is at `dstOff - offset` which
+// lies strictly before the write range, and overlapping reads are confined to the
+// `offset`-byte repeat region before it, so no lane reads an address another lane
+// writes in the same stride pass (the wave-sync in the caller orders the whole
+// copy anyway).
+void lzDecodeCopy<T : ILz4Target>(T tgt, uint32_t dstOff, uint32_t srcOff, uint32_t dist,
+                                  uint32_t length, uint32_t lane)
+{
+    if (dist == 1u)
+    {
+        // Plane-aware (pac): in bit-plane data most repeats are runs of one byte
+        // (empty planes). A fill: one load, then stores only.
+        const uint8_t v = tgt.load(srcOff);
+        for (uint32_t i = lane; i < length; i += LZ4_LANES)
+            tgt.store(dstOff + i, v);
+    }
+    else if (dist < length)
+    {
+        // Overlapping copy (the other pac case: a plane repeated, dist = one plane
+        // length). The source index wraps at `dist`; keep it incrementally instead
+        // of an integer modulo per byte.
+        uint32_t j = lane % dist;
+        const uint32_t step = LZ4_LANES % dist;
+        for (uint32_t i = lane; i < length; i += LZ4_LANES)
+        {
+            tgt.store(dstOff + i, tgt.load(srcOff + j));
+            j += step;
+            if (j >= dist)
+                j -= dist;
+        }
+    }
+    else
+    {
+        for (uint32_t i = lane; i < length; i += LZ4_LANES)
+            tgt.store(dstOff + i, tgt.load(srcOff + i));
+    }
+}
+
+// Copies a literal run: inCompressedData[compOffs+srcRel, +num) -> the target
+// [decOffs, +num). Uses the shared window when the whole run lies in it, else a
+// direct coalesced global read.
+void lzCopyLits<T : ILz4Target>(StructuredBuffer<uint8_t> compData, uint32_t compOffs,
+                                uint32_t srcRel, uint32_t num, uint32_t bufRel, uint32_t lane,
+                                T tgt, uint32_t decOffs)
+{
+    if (num > 0)
+    {
+        if (srcRel >= bufRel && srcRel + num <= bufRel + LZ4_INPUT_BUFFER_SIZE)
+        {
+            for (uint32_t i = lane; i < num; i += LZ4_LANES)
+                tgt.store(decOffs + i, gLz4InBuf[srcRel - bufRel + i]);
+        }
+        else
+        {
+            for (uint32_t i = lane; i < num; i += LZ4_LANES)
+                tgt.store(decOffs + i, compData[compOffs + srcRel + i]);
+        }
+    }
+}
+
+// Decodes one LZ4 block (compData[compOffs, +compSize) -> the target
+// [decOffs, +decSize)) and returns true if it decodes to exactly decSize bytes.
+// On a false return nothing outside the block's input/output range was read or
+// written. `lane` indexes the cooperative copies. All control flow here is
+// warp-uniform.
+bool lzDecodeBlock<T : ILz4Target>(StructuredBuffer<uint8_t> compData, uint32_t compOffs,
+                                   uint32_t compSize, T tgt, uint32_t decOffs, uint32_t decSize,
+                                   uint32_t lane)
+{
+    const uint32_t compEnd = compSize; // relative index, [0, compEnd)
+    uint32_t compIdx = 0;
+    uint32_t decIdx = 0;
+    uint32_t bufRel = 0;
+
+    bufRel = lzLoadAt(compData, compOffs, compEnd, compIdx, lane);
+
+    while (compIdx < compEnd)
+    {
+        // keep the window filled
+        if (bufRel + LZ4_INPUT_BUFFER_SIZE - compIdx < LZ4_PREFETCH_DIST)
+            bufRel = lzLoadAt(compData, compOffs, compEnd, compIdx, lane);
+
+        // token: high nibble = literal length, low nibble = match length
+        const uint8_t tok = lzInRead(compData, compOffs, compIdx, bufRel);
+        ++compIdx;
+        uint32_t numLit = uint32_t(tok >> 4u);
+        uint32_t numMatch = uint32_t(tok & 0x0Fu);
+        bool ok = true;
+        if (numLit == 15u)
+        {
+            uint32_t extra;
+            lzReadLSIC(compData, compOffs, compIdx, compEnd, bufRel, lane, extra, ok);
+            if (ok)
+                numLit += extra;
+        }
+        if (!ok)
+            return false;
+        if (numLit > decSize - decIdx || compIdx + numLit > compEnd)
+            return false;
+
+        // literal copy: inCompressedData[compIdx, +numLit) -> target[decIdx, +numLit)
+        lzCopyLits(compData, compOffs, compIdx, numLit, bufRel, lane, tgt, decOffs + decIdx);
+        compIdx += numLit;
+        decIdx += numLit;
+
+        // the last sequence has literals only
+        if (compIdx < compEnd)
+        {
+            if (compIdx + 2u > compEnd)
+                return false;
+            // 2-byte little-endian offset (from the shared window if it covers it)
+            const uint32_t offs = uint32_t(lzInRead(compData, compOffs, compIdx, bufRel)) |
+                                  (uint32_t(lzInRead(compData, compOffs, compIdx + 1u, bufRel)) << 8u);
+            compIdx += 2u;
+
+            uint32_t match = 4u + numMatch;
+            if (numMatch == 15u)
+            {
+                uint32_t extra;
+                lzReadLSIC(compData, compOffs, compIdx, compEnd, bufRel, lane, extra, ok);
+                if (ok)
+                    match += extra;
+            }
+            if (!ok)
+                return false;
+            if (offs == 0u || offs > decIdx || match > decSize - decIdx)
+                return false;
+
+            // the match reads bytes other lanes just wrote (the literals above)
+            AllMemoryBarrierWithGroupSync();
+            lzDecodeCopy(tgt, decOffs + decIdx, decOffs + decIdx - offs, offs, match, lane);
+            decIdx += match;
+        }
+    }
+    return decIdx == decSize;
+}
