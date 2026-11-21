@@ -197,6 +197,21 @@ output element by element with the reference and the oracle.
     with `setarch -R`). Checking that ASan still caught a planted bug showed
     the harness padded its inputs, hiding reads past the end; it now gives
     the walk exactly its input.
+28. **Pac zstd decode & literals tuning, sm_61 check** (2026-11-21, branch
+    `pac-zstd`). First run on a Pascal GTX 1050 Ti (`sm_61`): all 11 test
+    scripts pass with local cubins. Testing a 12-case matrix (`bench/pac_matrix.py`:
+    `silicon`, `thaumatin`, `CeO2` x `u16`/`u32` x `mask=0`/`mask=max-1`)
+    showed `seq.offs == P` in DS's `< 32` swizzle loop is dead code
+    (`P >= 256`, zero overlapping `P` matches), while `mask=max-1` exposed a
+    5.0x `ExecuteSequences` slowdown from byte loads/stores on 48-95%
+    non-overlapping `off == P` matches. Added generic `uint4` fills (`off=1`),
+    `uint4`/`uint32` aligned copies (`off=P`), fused short `off=1` fills, and
+    `uint32` literal copies in `ExecuteSequences`, plus `GS_PreInit`/
+    `GS_HuffmanTable` LDS overlap (`1614 -> 1292` dwords) and 1-search table
+    expansion in `InitHuffmanTableAndDecompressLiterals` (`ExecuteSequences`
+    up to 3.73x faster on `maskmax-1`, `Literals` -21% to -24%, stock
+    unchanged or faster; SPIR-V/Metal compile clean). Added real zstd HDF5
+    file checks to `tests/run_bshuf_chain.py`.
 
 ## Publication snapshot
 
@@ -238,6 +253,9 @@ and Jon Wright.
 - A `git stash`/history rewrite touches source mtimes: a test that runs
   `make` on another machine then relinks the library there (with that
   machine's toolchain and RPATH). Rebuild locally after rewriting history.
+- Testing only `mask=0` detector frames hid `off=P` (0.1% vs 48-95% of bytes
+  with `mask=max-1`): always cover both `mask=0` and `mask=max-1` across
+  sparse (`silicon`, `thaumatin`) and dense (`CeO2`) data.
 
 ## Original commit subjects
 
