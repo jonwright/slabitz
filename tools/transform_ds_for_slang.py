@@ -233,52 +233,90 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
     // When either path could handle the match copy, prefer this one since there is no modulo.
     else ZSTDGPU_BRANCH if (seq.offs >= zstdgpu_MinU32(laneCount, seq.mlen))
     {
-        // Generic vectorized non-overlapping aligned match copy (e.g. plane-to-plane
-        // repeats where offset P is a multiple of 16 or 4): disjoint src and dst ranges.
-        const bool canVec = (seq.offs >= copyLen) & (dstOfs >= seq.offs);
-        ZSTDGPU_BRANCH if (canVec && copyLen >= 64u && (seq.offs & 15u) == 0u)
+        // Generic vectorized aligned match copy (e.g. plane-to-plane repeats where
+        // offset P is a multiple of 16 or 4). When copyLen > seq.offs, chunk by
+        // seq.offs so every read stays strictly inside [srcOfs, dstOfs) and
+        // every write stays in [curDst, curDst + chunk), with no RAW hazard.
+        const bool canVec = (dstOfs >= seq.offs);
+        ZSTDGPU_BRANCH if (canVec && copyLen >= 64u && seq.offs >= 64u && (seq.offs & 15u) == 0u)
         {
             const uint32_t srcOfs = dstOfs - seq.offs;
             const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
-            const uint32_t nVecs = (copyLen - head16) >> 4u;
-            const uint32_t dstVecBase = (dstOfs + head16) >> 4u;
             const uint32_t srcVecBase = (srcOfs + head16) >> 4u;
-            const uint32_t tailStart = head16 + (nVecs << 4u);
-            const uint32_t tail16 = copyLen - tailStart;
-            if (laneId < head16)
+            uint32_t curDst = dstOfs;
+            uint32_t rem = copyLen;
+            ZSTDGPU_LOOP while (rem > 0u)
             {
-                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, dstData[srcOfs + laneId]);
-            }
-            ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
-            {
-                dstData16[dstVecBase + v] = dstData16[srcVecBase + v];
-            }
-            if (laneId < tail16)
-            {
-                zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
+                const uint32_t chunk = zstdgpu_MinU32(rem, seq.offs);
+                ZSTDGPU_BRANCH if (chunk >= head16 + 16u)
+                {
+                    const uint32_t nVecs = (chunk - head16) >> 4u;
+                    const uint32_t dstVecBase = (curDst + head16) >> 4u;
+                    const uint32_t tailStart = head16 + (nVecs << 4u);
+                    const uint32_t tail16 = chunk - tailStart;
+                    if (laneId < head16)
+                    {
+                        zstdgpu_TypedStoreU8(dstData, curDst + laneId, dstData[srcOfs + laneId]);
+                    }
+                    ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
+                    {
+                        dstData16[dstVecBase + v] = dstData16[srcVecBase + v];
+                    }
+                    if (laneId < tail16)
+                    {
+                        zstdgpu_TypedStoreU8(dstData, curDst + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
+                    }
+                }
+                else
+                {
+                    ZSTDGPU_LOOP for (uint32_t i = laneId; i < chunk; i += laneCount)
+                    {
+                        zstdgpu_TypedStoreU8(dstData, curDst + i, dstData[srcOfs + i]);
+                    }
+                }
+                curDst += chunk;
+                rem -= chunk;
             }
             dstOfs += seq.mlen;
         }
-        else ZSTDGPU_BRANCH if (canVec && copyLen >= 32u && (seq.offs & 3u) == 0u)
+        else ZSTDGPU_BRANCH if (canVec && copyLen >= 32u && seq.offs >= 32u && (seq.offs & 3u) == 0u)
         {
             const uint32_t srcOfs = dstOfs - seq.offs;
             const uint32_t head4 = (4u - (dstOfs & 3u)) & 3u;
-            const uint32_t nWords = (copyLen - head4) >> 2u;
-            const uint32_t dstWordBase = (dstOfs + head4) >> 2u;
             const uint32_t srcWordBase = (srcOfs + head4) >> 2u;
-            const uint32_t tailStart = head4 + (nWords << 2u);
-            const uint32_t tail4 = copyLen - tailStart;
-            if (laneId < head4)
+            uint32_t curDst = dstOfs;
+            uint32_t rem = copyLen;
+            ZSTDGPU_LOOP while (rem > 0u)
             {
-                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, dstData[srcOfs + laneId]);
-            }
-            ZSTDGPU_LOOP for (uint32_t w = laneId; w < nWords; w += laneCount)
-            {
-                dstData32[dstWordBase + w] = dstData32[srcWordBase + w];
-            }
-            if (laneId < tail4)
-            {
-                zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
+                const uint32_t chunk = zstdgpu_MinU32(rem, seq.offs);
+                ZSTDGPU_BRANCH if (chunk >= head4 + 4u)
+                {
+                    const uint32_t nWords = (chunk - head4) >> 2u;
+                    const uint32_t dstWordBase = (curDst + head4) >> 2u;
+                    const uint32_t tailStart = head4 + (nWords << 2u);
+                    const uint32_t tail4 = chunk - tailStart;
+                    if (laneId < head4)
+                    {
+                        zstdgpu_TypedStoreU8(dstData, curDst + laneId, dstData[srcOfs + laneId]);
+                    }
+                    ZSTDGPU_LOOP for (uint32_t w = laneId; w < nWords; w += laneCount)
+                    {
+                        dstData32[dstWordBase + w] = dstData32[srcWordBase + w];
+                    }
+                    if (laneId < tail4)
+                    {
+                        zstdgpu_TypedStoreU8(dstData, curDst + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
+                    }
+                }
+                else
+                {
+                    ZSTDGPU_LOOP for (uint32_t i = laneId; i < chunk; i += laneCount)
+                    {
+                        zstdgpu_TypedStoreU8(dstData, curDst + i, dstData[srcOfs + i]);
+                    }
+                }
+                curDst += chunk;
+                rem -= chunk;
             }
             dstOfs += seq.mlen;
         }

@@ -47,7 +47,8 @@ def load_pac(pac_path):
     pac.pac_create.restype = vp
     pac.pac_create.argtypes = [ci]
     pac.pac_free.argtypes = [vp]
-    pac.pac_set_raw_literals.argtypes = [vp, ci]
+    if hasattr(pac, "pac_set_raw_literals"):
+        pac.pac_set_raw_literals.argtypes = [vp, ci]
     pac.pac_bound.restype = sz
     pac.pac_bound.argtypes = [sz, sz, sz]
     pac.pac_compress_chunk.restype = sz
@@ -132,7 +133,10 @@ def main():
                 return 0
         else:
             enc = pac.pac_create(2)  # PAC_ZSTD
-            pac.pac_set_raw_literals(enc, a.raw)
+            if hasattr(pac, "pac_set_raw_literals"):
+                pac.pac_set_raw_literals(enc, a.raw)
+            elif a.raw != 0:
+                print("note: libpac.so does not export pac_set_raw_literals; ignoring --raw %d" % a.raw)
 
     with h5py.File(os.path.join(ex, "mask.h5"), "r") as f:
         mask4m = f["mask"][:].astype(bool)

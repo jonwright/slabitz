@@ -374,6 +374,6 @@ static const sbz_kinfo sbz_kernel_table[SBZK_COUNT] = {
 
 /* Build ID of the kernel set this library was generated with; a kernel
  * directory must carry the same ID in its sbz_kernels.id file. */
-#define SBZ_KERNELS_ID "bdf608e50497a7ca"
+#define SBZ_KERNELS_ID "6446e283157f4598"
 
 #endif /* SBZ_KERNELS_GEN_H */
