@@ -49,10 +49,11 @@ P (the plane below, P = block elements / 8, equal to `blockBytes / (8 * e)`).
      - `seq.offs == 1u` (`copyLen >= 32`): broadcast single-byte L1 read (no
        wave intrinsic), then unaligned head/tail bytes and 16-byte aligned
        `uint4` stores across the interior.
-     - Non-overlapping aligned matches (`seq.offs >= copyLen`): 16-byte `uint4`
-       loads/stores when `copyLen >= 64` and `(seq.offs & 15) == 0`, or 4-byte
-       `uint32` loads/stores when `copyLen >= 32` and `(seq.offs & 3) == 0`,
-       with byte head/tail handling.
+     - Aligned matches (`seq.offs >= 64` and `(seq.offs & 15) == 0` for
+       `uint4` when `copyLen >= 64`, or `seq.offs >= 32` and `(seq.offs & 3) == 0`
+       for `uint32` when `copyLen >= 32`), chunked in `seq.offs` steps when
+       `copyLen > seq.offs` so overlapping `off == P` matches stay race-free
+       and vectorized, with byte head/tail handling.
    - In `zstdgpu_ExecuteSequence_FusedCopy`: added fused short `seq.offs == 1`
      fill (`total <= 32`) when `llen + mlen` fits in one wave, avoiding a
      `dstData` read-after-write stall whenever `llen > 0`.
@@ -110,6 +111,23 @@ Wall time per frame (ms/fr and GB/s):
 | `ceo2_u32_mask0` | stock | 4.89 | 3.83 (4.66) | 3.84 (4.65) | **3.34 (5.36)** |
 | `ceo2_u32_maskmax-1` | pac | 5.08 | 3.59 (4.99) | 2.68 (6.67) | **2.46 (7.27)** |
 | `ceo2_u32_maskmax-1` | stock | 4.85 | 4.51 (3.97) | 4.54 (3.94) | **4.01 (4.46)** |
+
+## Update for `pac-zstd` 0.2.0 (`1dba63f`, 2026-11-22)
+
+- `pac-zstd` 0.2.0 added sequence merging (`84fda9e`) and removed
+  `pac_set_raw_literals` (`3796c1f`). Merged `off == P` matches produce
+  `copyLen > seq.offs`, which initially fell back to the 1-byte-per-lane loop
+  (`silicon_u32_maskmax-1` `ExecuteSequences` 6570.6 us/call, wall 2.27 ms/fr).
+- Generalizing `zstdgpu_MatchCopy` to chunk aligned matches by `seq.offs`
+  (`tools/transform_ds_for_slang.py`, kernel ID `6446e283157f4598`) recovered
+  and improved both `pac` and `stock` `maskmax-1` speeds (`bench/pac_matrix.py`,
+  24/24 runs ok, 648,854,592 B compared, GTX 1050 Ti `sm_61`):
+  - `silicon_u16_maskmax-1`: `pac` ratio 174.70, 1.32 -> **0.81 ms/fr** (11.10 GB/s)
+  - `silicon_u32_maskmax-1`: `pac` ratio 316.63, 2.27 -> **1.21 ms/fr** (14.80 GB/s; `ExecuteSequences` 6570.6 -> **2321.1 us/call**)
+  - `thaumatin_u16_maskmax-1`: `pac` ratio 66.87, 4.84 -> **3.34 ms/fr** (10.85 GB/s)
+  - `thaumatin_u32_maskmax-1`: `pac` ratio 128.28, 8.69 -> **5.45 ms/fr** (13.27 GB/s; `stock` 9.46 -> **7.34 ms/fr**)
+  - `ceo2_u32_maskmax-1`: `pac` ratio 5.08, 3.27 -> **2.43 ms/fr** (7.36 GB/s; `ExecuteSequences` 5890.1 -> **2609.5 us/call**)
+- `bench/pac_matrix.py` guards `pac_set_raw_literals` with `hasattr` for 0.2.0.
 
 ## Verification
 
