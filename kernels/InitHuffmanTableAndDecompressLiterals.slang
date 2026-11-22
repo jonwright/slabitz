@@ -7,8 +7,8 @@
 #include "zstdgpu_shaders.h"
 #include "srt_headers/zstdgpu_srt_structs.h"
 
-// LDS = CodeAndSymbol(256) + PreInit(322) + RankIndex(12) + HuffmanTable(1<<10) = 1614 dwords.
-groupshared uint32_t Lds[1614];
+// LDS = CodeAndSymbol(256) + RankIndex(12) + max(PreInit(322), HuffmanTable(1<<10)) = 1292 dwords.
+groupshared uint32_t Lds[1292];
 #define ZSTDGPU_LDS Lds
 #include "zstdgpu_lds_hlsl.h"
 

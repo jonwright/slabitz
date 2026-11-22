@@ -1061,8 +1061,10 @@ static int stage2(sbz_dctx *dc)
 
     /* [Execute Sequences] (one threadgroup per frame). */
     {
+        const sbz_bind b[] = { { "inoutUnCompressedFramesData32", B_UnCompressedFramesData },
+                               { "inoutUnCompressedFramesData16", B_UnCompressedFramesData } };
         const sbz_scalar s[] = { { "litCapacity", cntLit }, { "seqCapacity", cntSeq } };
-        TRY(launch(dc, SBZK_ExecuteSequences, nf, NULL, 0, s, NB(s)));
+        TRY(launch(dc, SBZK_ExecuteSequences, nf, b, NB(b), s, NB(s)));
     }
     if (getenv("SLABITZ_DEBUG_SYNC")) BE_TRY(dc->be->ops->sync(dc->be), "chk:Execute");
 

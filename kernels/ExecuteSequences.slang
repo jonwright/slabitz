@@ -15,6 +15,8 @@
 void main(StructuredBuffer<uint8_t> inCompressedData,
           StructuredBuffer<uint8_t> inDecompressedLiterals,
           RWStructuredBuffer<uint8_t> inoutUnCompressedFramesData,
+          RWStructuredBuffer<uint32_t> inoutUnCompressedFramesData32,
+          RWStructuredBuffer<uint4> inoutUnCompressedFramesData16,
           StructuredBuffer<zstdgpu_Counters> inCounters,
           StructuredBuffer<uint32_t> inPerFrameBlockCountCMP,
           StructuredBuffer<uint32_t> inBlockSizePrefix,
@@ -43,6 +45,8 @@ void main(StructuredBuffer<uint8_t> inCompressedData,
     srt.inCompressedData                = inCompressedData;
     srt.inDecompressedLiterals          = inDecompressedLiterals;
     srt.inoutUnCompressedFramesData     = inoutUnCompressedFramesData;
+    srt.inoutUnCompressedFramesData32   = inoutUnCompressedFramesData32;
+    srt.inoutUnCompressedFramesData16   = inoutUnCompressedFramesData16;
     srt.inCounters                      = inCounters;
     srt.inPerFrameBlockCountCMP         = inPerFrameBlockCountCMP;
     srt.inBlockSizePrefix               = inBlockSizePrefix;

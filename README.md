@@ -9,8 +9,8 @@ driver API.
 
 **Status: work in progress.** The C chain decodes zstd frames,
 bitshuffle-zstd chunks and bitshuffle-LZ4 chunks, and matches libzstd /
-hdf5plugin in the tests, on Volta and newer
-GPUs and on a Kepler GTX TITAN Black (sm_35). Older cards use the same
+hdf5plugin in the tests, on Volta and newer GPUs, on a Pascal GTX 1050 Ti
+(sm_61), and on a Kepler GTX TITAN Black (sm_35). Older cards use the same
 kernels: a small header changes how warp-wide operations pick their lanes on
 pre-Volta GPUs and does nothing on newer ones. See `AGENTS.md`.
 

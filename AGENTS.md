@@ -42,10 +42,10 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | `sbz_dctx_bslz4_decompress` (bitshuffle-LZ4 chunks, `kernels/Lz4DecodeBlocks.slang`, fused `kernels/Lz4DecodeUnshuffle.slang` for full blocks of at most 8 kB) | matches hdf5plugin, u8-u64, 8k-256k blocks, tails, corrupt input -> error, fused == unfused; L40S and TITAN Black. Phases 1-3 of `docs/plan_lz4_slang.md` done; plane-aware match copy (runs as fills, plane repeats without a modulo; pac's idea, 3a94af2). L40S, 16 frames/call, device us/frame: silicon 20.4 vs reference 19.6, CeO2 53 vs 67; wall faster than the reference on both (silicon 0.54 ms per 16-frame call, 263 GB/s). `SLABITZ_LZ4_FUSED=0` forces the unfused path |
 | Real pac files (silicon u16, CeO2 u32), 16 frames/call | L40S 41 / 6.5 GB/s; TITAN Black 10 / 2.7 GB/s (`bench/old_cards.py`) |
 | Volta+ (sm_70 and newer) | works (tested on sm_89) |
-| Pre-Volta (sm_35 to sm_61) | works on the sm_35 TITAN Black: check_bshuf 17/17, all per-stage and chain tests; sm_50/sm_61 not yet run |
+| Pre-Volta (sm_35 to sm_61) | works on the sm_35 TITAN Black (check_bshuf 17/17, all per-stage and chain tests) and on the sm_61 GTX 1050 Ti (all 11 test scripts + 12-case matrix in `bench/pac_matrix.py` with local cubins; `build/kernels` fatbins not yet rebuilt/spot-checked after `pac-zstd` kernel edits); sm_50 not yet run |
 | Portable kernels (`pixi run -e kepler build-sm35 && pixi run build-fatbins` -> `build/kernels/`) | one fatbin per kernel: sm_35 (NVRTC 11.8), sm_50..sm_90 (nvcc 12.6), compute_90 PTX; 22 files, 5.1 MB. `tests/run_suite_kernel_dir.sh build/kernels` passes on the L40S (same speed as local cubins) and on the TITAN Black under driver 340 |
-| Other Slang targets (compile only, slangc 2026.22) | Last survey at 21 kernels: SPIR-V and HLSL 19/19; Metal 13/19: `WavePrefixCountBits` has no Metal lowering (4 DS kernels: PrefixSum, ComputePrefixSum, ParseCompressedBlocks, InitFseTable) and Metal lacks `GetDimensions` (both unshuffle kernels; pass byte counts as scalars instead). The 2 LZ4 kernels (`Lz4DecodeBlocks`, `Lz4DecodeUnshuffle`) build for SPIR-V and Metal. `BshufWalkChunks` was added later: re-run the survey |
-| pac-written zstd (a local clone of plane_aware_compressors) | decodes byte-exact (pac_repack_chunk of the LZ4 test files, in `$SLABITZ_WS/tmp/pac`). ExecuteSequences fills offset-1 runs (e870151): pac silicon 2155 -> 837 us per 16-frame call, pac CeO2 2840 -> 1568; stock zstd unchanged. pac silicon 1.69 ms per 16-frame call, stock zstd 2.8 |
+| Other Slang targets (compile only, slangc 2026.22) | Last survey at 21 kernels: SPIR-V and HLSL 19/19; Metal 13/19: `WavePrefixCountBits` has no Metal lowering (4 DS kernels: PrefixSum, ComputePrefixSum, ParseCompressedBlocks, InitFseTable) and Metal lacks `GetDimensions` (both unshuffle kernels; pass byte counts as scalars instead). The 2 LZ4 kernels (`Lz4DecodeBlocks`, `Lz4DecodeUnshuffle`) build for SPIR-V and Metal. `BshufWalkChunks` was added later: re-run the survey. `ExecuteSequences` and `InitHuffmanTableAndDecompressLiterals` re-checked for SPIR-V and Metal after tuning |
+| pac-written zstd (local clone of pac-zstd) | done on branch `pac-zstd` (`docs/plan_pac_zstd.md`): verified byte-exact across the 12-case matrix (`bench/pac_matrix.py`: silicon/thaumatin/CeO2 x u16/u32 x mask=0/max-1, 648.9 MB compared) and real zstd files (`tests/run_bshuf_chain.py`). `ExecuteSequences` uses generic `uint4` fills (`off=1`), `uint4`/`uint32` aligned copies (`off=P`), fused short `off=1` fills, and `uint32` literal copies (`maskmax-1` `ExecuteSequences` 3.73x faster on `silicon_u32`); `InitHuffmanTableAndDecompressLiterals` overlaps `GS_PreInit`/`GS_HuffmanTable` (1614 -> 1292 dwords) and uses 1-search table expansion (`Literals` -21% to -24%) |
 | `src/host_walk.c` on corrupt input | bounds-checked: any input -> `SBZ_OK` / `SBZ_ERR_CORRUPT` / `SBZ_ERR_LIMIT` (15 named corrupt cases; ASan/UBSan fuzz, `make build/fuzz_host_walk`, 200k mutants in the test). Compressed-block contents are still trusted by the GPU kernels |
 | Python wrapper, packaging, pytest suite | not started (tests are standalone scripts; a ctypes loader is in `slabitz/`) |
 
@@ -137,10 +137,12 @@ to an output buffer.
 ## Next steps (in order)
 
 1. **Old cards: spot-check** sm_50 (960M) and sm_61 (1050 Ti) with the
-   portable fatbins: `tests/run_suite_kernel_dir.sh build/kernels` on each.
-   Deferred until the user is home with those machines. sm_35 is the floor:
-   Fermi (sm_20, crunch's Quadro 600) is not supported (no warp shuffles,
-   no toolkit after CUDA 8); the library fails there cleanly with
+   portable fatbins: rebuild `build/sm_35` (`pixi run -e kepler build-sm35`) and
+   `build/kernels` (`pixi run build-fatbins`) after the `pac-zstd` kernel edits,
+   then run `tests/run_suite_kernel_dir.sh build/kernels` on each. (sm_61 local
+   cubins already pass all 11 test scripts and `bench/pac_matrix.py`.) sm_35 is
+   the floor: Fermi (sm_20, crunch's Quadro 600) is not supported (no warp
+   shuffles, no toolkit after CUDA 8); the library fails there cleanly with
    `SBZ_ERR_KERNEL` ("no kernel image").
 2. **P4 streaming API, Python wrapper, wheel**: `docs/plan_p4_api.md`
    (five steps; decisions settled with the user 2026-11-20: caller-owned
@@ -186,15 +188,23 @@ to an output buffer.
    Packaging: the 22 per-kernel fatbins are intentional (one CUDA module per
    kernel); if a single distribution file is wanted later, add a host-side
    bundle loaded by slice, never a merged module.
-3. **Pac ideas for zstd (decode side)**: only offset-1 fills are in
-   ExecuteSequences (e870151). The remaining decoder idea is the plane-repeat
-   case (match offset = one plane): pass the optional plane geometry from the
-   bitshuffle-zstd path and copy with an incremental index instead of a modulo
-   per byte, guarded so stock zstd is unchanged. Add a committed test/bench on
-   the pac zstd files (`silicon_u16_zstd2_256k.h5`, `ceo2_u32_zstd2_256k.h5`,
-   read-only in `SLABITZ_EXAMPLES`) and measure against stock zstd. The pac
-   encoder is a separate project and stays out of scope. Subtle C/kernel work,
-   not for the DeepSeek worker.
+3. **Pac ideas for zstd (decode side) -- done** (branch `pac-zstd`, `docs/plan_pac_zstd.md`):
+   - Investigation across the 12-case matrix (`silicon`, `thaumatin`, `CeO2` x
+     `u16`/`u32` x `mask=0`/`mask=max-1`, `bench/pac_matrix.py`) showed
+     `seq.offs == P` in DS's `< 32` swizzle loop does not apply (`P >= 256` B,
+     zero overlapping `P` matches), while `mask=max-1` exposed a 5.0x
+     `ExecuteSequences` slowdown from byte-at-a-time loads/stores on 48-95%
+     non-overlapping `off == P` matches.
+   - Implemented generic standard-zstd tuning (no `planeSize` arg):
+     vectorized `uint4`/`uint32` `zstdgpu_MatchCopy`, fused short `off=1` in
+     `ExecuteSequence_FusedCopy`, `uint32` `zstdgpu_MemCpy_DstSrc`, and
+     `InitHuffmanTableAndDecompressLiterals` LDS overlap (1614 -> 1292 dwords) +
+     1-search table expansion.
+   - GTX 1050 Ti (248 kB, 4 frames/call): `silicon_u32_maskmax-1`
+     `ExecuteSequences` 3.73x faster (wall 2.32 -> 1.24 ms/fr); `Literals`
+     -21% to -24% on `CeO2` and `thaumatin`; stock `silicon`/`thaumatin`
+     unchanged and stock `CeO2` 6-13% faster. Committed `tests/run_bshuf_chain.py`
+     real-file zstd checks (`SLABITZ_EXAMPLES`).
 4. **Slang CPU target survey (compile only)**: Slang's CPU target is
    experimental (C++ kernel/host, exe/lib) and compute-only. Compile the 22
    entries for it with the pinned slangc, record which wave/`groupshared`/

@@ -280,6 +280,9 @@ def run_h5(path, frames):
             _, chunk = ds.id.read_direct_chunk(tuple([i] + [0] * (ds.ndim - 1)))
             raw.append(bytes(chunk))
         nout = sum(int.from_bytes(r[0:8], "big") for r in raw)
+        if nout == 0:
+            print("FAIL h5 %s: zero bytes compared" % path)
+            return 1
         want = ds[0:nframes].reshape(-1).tobytes()[:nout]
 
         lib = load()
@@ -303,8 +306,8 @@ def run_h5(path, frames):
                 print("FAIL h5 %s: timed rc=%d: %s" % (path, rc, lib.sbz_dctx_error(dc).decode()))
                 return 1
             gbs = (nout / dt) / 1e9
-            print("ok   h5 %s: %d chunks (%d bytes) decoded in %.4f s (%.2f GB/s)"
-                  % (path, len(raw), nout, dt, gbs))
+            print("ok   h5 %s: %d chunks (%d B compared) decoded in %.4f s (%.2f GB/s)"
+                  % (os.path.basename(path), len(raw), nout, dt, gbs))
             return 0
         finally:
             lib.sbz_dctx_destroy(dc)
@@ -346,6 +349,22 @@ def main():
             bad += r.returncode != 0
         except subprocess.TimeoutExpired:
             print("FAIL corrupt %s: timeout (%ds) -- GPU hang?" % (case, TIMEOUT))
+            bad += 1
+    examples = os.environ.get("SLABITZ_EXAMPLES") or os.path.join(ROOT, "workspace", "examples")
+    paths = []
+    for name in ("silicon_u16_zstd2_256k.h5", "ceo2_u32_zstd2_256k.h5"):
+        path = os.path.join(examples, name)
+        if os.path.exists(path):
+            paths.append(path)
+        else:
+            print("ok   %s: not readable, skipped (set SLABITZ_EXAMPLES)" % path)
+    for path in paths:
+        try:
+            r = subprocess.run([sys.executable, __file__, "--h5", path, "--frames", "16"],
+                               timeout=TIMEOUT)
+            bad += r.returncode != 0
+        except subprocess.TimeoutExpired:
+            print("FAIL h5 %s: timeout (%ds) -- GPU hang?" % (path, TIMEOUT))
             bad += 1
     print("%s: %d case(s) failed" % ("FAIL" if bad else "PASS", bad))
     return 1 if bad else 0
