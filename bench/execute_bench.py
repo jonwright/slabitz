@@ -439,7 +439,7 @@ def run_gpu_bench(frames, N, cubin=CUBIN, warmup=2, reps=5, verify=True, per_fra
     # ---- upload all buffers (outside the timed region) ----
     comp_mem, comp_cnt = ctx.up(g["cmp_data"])
     lit_mem, lit_cnt = ctx.up(g["literals"] if g["literals"] else b"\x00")
-    out_prefill = bytearray(g["out_size"])
+    out_prefill = bytearray(g["out_size"] + (-g["out_size"]) % 16)
     for (dest, data) in g["raw_fill"]:
         out_prefill[dest:dest + len(data)] = data
     out_mem, out_cnt = ctx.up(bytes(out_prefill))
@@ -470,6 +470,8 @@ def run_gpu_bench(frames, N, cubin=CUBIN, warmup=2, reps=5, verify=True, per_fra
         Buf(comp_mem.ptr, comp_cnt),
         Buf(lit_mem.ptr, lit_cnt),
         Buf(out_mem.ptr, out_cnt),
+        Buf(out_mem.ptr, out_cnt // 4),
+        Buf(out_mem.ptr, out_cnt // 16),
         Buf(ctr_mem.ptr, ctr_cnt),
         Buf(pfb_mem.ptr, pfb_cnt),
         Buf(sp_mem.ptr, sp_cnt),
@@ -480,6 +482,8 @@ def run_gpu_bench(frames, N, cubin=CUBIN, warmup=2, reps=5, verify=True, per_fra
         Buf(gi_mem.ptr, gi_cnt),
         Buf(ss_mem.ptr, ss_cnt),
         Buf(cb_mem.ptr, cb_cnt),
+        ct.c_uint32(lit_cnt),
+        ct.c_uint32(g["t_seqs"]),
     ]
 
     def launch():
