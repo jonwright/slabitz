@@ -114,7 +114,7 @@ header), `slabitz/loader.py`, `tests/run_api.py` (new), `pixi.toml`,
 3. **Header portability.** The header compiles as C89 and as C++
    (`gcc -std=c89 -pedantic -fsyntax-only`, `g++ -fsyntax-only`).
 4. `nm -D --defined-only build/libslabitz.so` lists only `sbz_*` symbols.
-5. `pixi run test`, `pixi run test-kernels` and `bench/gate.py --compare`
+5. `sbz test`, `sbz test-kernels` and `bench/gate.py --compare`
    pass.
 6. **Kepler.** On crunch (TITAN Black, driver 340), `tests/run_api.py`
    passes with `build/kernels`, or the report states that crunch was not

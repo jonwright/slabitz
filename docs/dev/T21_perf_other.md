@@ -50,7 +50,7 @@ PR, with a gate `--compare` table. An item that does not pay is recorded in
 2. The item's target is met with no other cell regressing beyond the gate
    thresholds. If the target is missed, the item is not merged; history
    records why.
-3. `pixi run test`, `pixi run test-kernels` and the T06/T07 subsets pass.
+3. `sbz test`, `sbz test-kernels` and the T06/T07 subsets pass.
    The kernel sets are rebuilt if kernels changed.
 
 ## Reviewer checks

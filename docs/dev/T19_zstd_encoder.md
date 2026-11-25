@@ -104,7 +104,7 @@ New `kernels/Zstd*Encode*.slang` and `kernels/lib/zstd_encode*.slangh`,
 4. **Throughput.** On the L40S (Slurm), report GB/s for silicon u16 and
    CeO2 u32 at 16 frames. Compare it with pac CPU, single thread and all
    cores, and with nvCOMP zstd compress if it is available.
-5. `pixi run test`, `pixi run test-kernels` and `bench/gate.py --compare`
+5. `sbz test`, `sbz test-kernels` and `bench/gate.py --compare`
    pass. The decode cells must be unchanged.
 
 ## Reviewer checks

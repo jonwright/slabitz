@@ -122,7 +122,7 @@ Repository `../pac-zstd`, branch `gemini-minimal-p9fix`, HEAD 162af8b.
 4. **Throughput.** Transpose plus parse on the L40S (Slurm), in GB/s of
    input, for silicon u16 and CeO2 u32 at 16 frames. Report it, and
    compare with pac on the CPU, single thread and all threads.
-5. `pixi run test` and `pixi run test-kernels` pass. The new kernels
+5. `sbz test` and `sbz test-kernels` pass. The new kernels
    compile for SPIR-V and Metal (`slangc -target spirv|metal`), or the
    report lists which intrinsic blocks it.
 

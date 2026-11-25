@@ -2,7 +2,7 @@
 
 Status: todo
 Executor: worker (DeepSeek), reviewed by Claude
-Depends on: T01
+Depends on: T01, T00 (its committed subset `tests/data/synth/` joins `sbz test` here)
 Branch: `t02-test-harness`
 
 ## Goal
@@ -12,12 +12,12 @@ Make "the tests pass" mean something:
 - one pytest entry point over all the scripts;
 - missing example data becomes a failure when data is required;
 - the pac-specific fast paths in ExecuteSequences are exercised by committed
-  fixtures inside `pixi run test`, instead of only by the manual
+  fixtures inside `sbz test`, instead of only by the manual
   `bench/pac_matrix.py`.
 
 ## Background
 
-- `pixi run test` runs 11 scripts (`pixi.toml:44-59`). The real-file
+- `sbz test` runs 11 scripts (`pixi.toml:44-59`). The real-file
   checks in `tests/run_bshuf_chain.py:353-360` and
   `tests/run_bslz4_chain.py:710-717` print `ok ... skipped` when
   `SLABITZ_EXAMPLES` is unset. `bench/pac_matrix.py:118-119` returns 0 when
@@ -47,14 +47,14 @@ Make "the tests pass" mean something:
 ## Settled design
 
 - **pytest entry, `tests/test_suite.py`.**
-  - One pytest test per script in `pixi run test`, plus one per non-retired
-    script in `pixi run test-kernels` (from T01). Each runs as a subprocess
+  - One pytest test per script in `sbz test`, plus one per non-retired
+    script in `sbz test-kernels` (from T01). Each runs as a subprocess
     under a timeout and fails on a nonzero exit, showing the script's
     output on failure.
   - Markers: `gpu` (needs a CUDA device) and `slow` (more than 60 s).
-  - pixi task `pytest`.
-  - If adding pytest needs a `pixi.lock` change, make the change and
-    report it. The scripts stay runnable on their own (crunch runs them
+  - `sbz pytest` (and the pixi task of the same name, which calls
+    `tools/sbz.sh`). pytest is in the shared env from T-1; do not change
+    the env. The scripts stay runnable on their own (crunch runs them
     without pytest).
 - **`SLABITZ_REQUIRE_DATA=1`.** Every place that would print "skipped"
   for missing example data or a missing libpac must instead exit nonzero
@@ -76,7 +76,7 @@ Make "the tests pass" mean something:
   - Keep `data/pac/` under 3 MB in total: crop frames, or use fewer frames.
     Each case must still contain all three match kinds listed under
     "Acceptance".
-- **New `tests/run_pac_fixtures.py`, added to `pixi run test`.** It
+- **New `tests/run_pac_fixtures.py`, added to `sbz test`.** It
   decodes each fixture through `sbz_dctx_bshuf_decompress` /
   `sbz_dctx_bslz4_decompress`, sync and async, and compares the SHA-256 of
   each frame. It also decodes on the CPU with `bitshuffle`/`hdf5plugin` and
@@ -85,7 +85,7 @@ Make "the tests pass" mean something:
   SEQ dumps from `tools/edu_oracle.py` to count, per zstd case, the
   sequences with `off == 1`, `off == P` with `len <= off`, and `off == P`
   with `len > off`. It prints the counts.
-- **Audit of "compared nothing".** Grep every script in `pixi run test`
+- **Audit of "compared nothing".** Grep every script in `sbz test`
   for its final PASS line, and make sure each prints a compared count and
   fails on zero. List in the report any script you had to fix.
 
@@ -93,12 +93,11 @@ Make "the tests pass" mean something:
 
 `tests/test_suite.py`, `tests/run_pac_fixtures.py`,
 `tools/gen_pac_fixtures.py`, `data/pac/*`, the "skipped" branches in
-`tests/*.py` and `bench/pac_matrix.py`, `pixi.toml`, `pixi.lock` (only for
-pytest), `docs/dev/reports/T02.md`.
+`tests/*.py` and `bench/pac_matrix.py`, `pixi.toml` (task list only), `docs/dev/reports/T02.md`.
 
 ## Acceptance
 
-1. `timeout 3600 pixi run pytest -m "not slow"` passes, with one test per
+1. `timeout 3600 sbz pytest -m "not slow"` passes, with one test per
    script.
 2. `SLABITZ_EXAMPLES=/nonexistent SLABITZ_REQUIRE_DATA=1 python3
    tests/run_bshuf_chain.py` exits nonzero, naming the missing file.
@@ -108,7 +107,7 @@ pytest), `docs/dev/reports/T02.md`.
    case, nonzero counts in all three columns (`off==1`, `off==P len<=off`,
    `off==P len>off`). It also prints the compared bytes, nonzero, for both
    the GPU-vs-hash and the CPU-vs-hash comparisons.
-5. `CUDA_ARCH=sm_89 pixi run test` passes and includes
+5. `CUDA_ARCH=sm_89 sbz test` passes and includes
    `run_pac_fixtures.py`.
 
 ## Reviewer checks

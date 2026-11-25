@@ -87,7 +87,7 @@ bug.
    u16 and CeO2 u32 at 16 frames per call. Compare it with pac on the CPU,
    single thread and all cores of the node, and with nvCOMP LZ4 compress
    if it is available (`bench/baselines.py` has nvCOMP setup).
-4. `pixi run test`, `pixi run test-kernels` and `bench/gate.py --compare`
+4. `sbz test`, `sbz test-kernels` and `bench/gate.py --compare`
    pass. The decode cells must be unchanged.
 
 ## Reviewer checks

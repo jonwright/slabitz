@@ -2,7 +2,7 @@
 
 Status: todo
 Executor: Claude (small, but the fixes need care about buffer meanings)
-Depends on: -
+Depends on: T-1
 Branch: `t01-kernel-arg-checks`
 
 ## Goal
@@ -52,7 +52,7 @@ parameters, and the kernel may still "pass".
   still requests `shared=1614*4` bytes; the literals kernel's LDS is now
   1292 dwords (check the kernel source and use what it declares).
 - **Scripts not in the test task.** 24 per-kernel scripts in `tests/` are
-  not in `pixi run test` (`pixi.toml:44-59`): compare_initfsetable,
+  not in `sbz test` (`pixi.toml:44-59`): compare_initfsetable,
   compare_parse_blocks, compare_parse_blocks_cases, run_bo_chain,
   run_cps_chain, run_decodehw_chain, run_dhw_chain, run_dsq_chain,
   run_e2e_chain, run_exec_gpu_chain, run_exec_multiblock, run_fso_chain,
@@ -109,9 +109,9 @@ PropagateFseIndex (the authoritative argument meanings).
   `timeout 300`. It passes the cubin path from `kparams.info()` under
   `${SLABITZ_KERNEL_DIR:-build}`. It prints one line per script (`PASS`,
   `FAIL` or `RETIRED`) and exits nonzero on any `FAIL`.
-- **The test task.** Do not add `test-kernels` to `pixi run test`; keep the
+- **The test task.** Do not add `test-kernels` to `sbz test`; keep the
   two separate, since the per-kernel set is slower. AGENTS.md gets a rule:
-  "run `pixi run test-kernels` after any kernel signature change".
+  "run `sbz test-kernels` after any kernel signature change".
 
 ## Files that may change
 
@@ -121,7 +121,7 @@ per-kernel scripts in `tests/`, `bench/execute_bench.py`, `pixi.toml`
 
 ## Acceptance
 
-Run on an idle GPU, after `CUDA_ARCH=sm_89 pixi run build`.
+Run on an idle GPU, after `CUDA_ARCH=sm_89 sbz build`.
 
 1. `python3 tests/kparams.py --self-test` exits 0 and prints
    `22 kernels parsed, counts match`.
@@ -129,10 +129,10 @@ Run on an idle GPU, after `CUDA_ARCH=sm_89 pixi run build`.
    `grep -L "check_args" $(grep -l "cuLaunchKernel\|\.fn(\|fn(grid" tests/*.py bench/*.py)`
    prints nothing. (Files that do not launch kernels are excluded by the
    inner grep.)
-3. `timeout 3600 pixi run test-kernels` exits 0. Every line is `PASS` or
+3. `timeout 3600 sbz test-kernels` exits 0. Every line is `PASS` or
    `RETIRED`, there are at least 18 `PASS` lines, and each PASS script
    printed a nonzero compared count.
-4. `CUDA_ARCH=sm_89 timeout 3600 pixi run test` passes (11 scripts).
+4. `CUDA_ARCH=sm_89 timeout 3600 sbz test` passes (11 scripts).
 5. `python3 bench/execute_bench.py` (default settings) prints
    `verified=True`, or its equivalent, for every case.
 

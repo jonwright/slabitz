@@ -99,7 +99,7 @@ regenerated `src/sbz_kernels_gen.h`), `tests/run_features.py`,
    `tests/run_frame_bounds.py`).
 4. `bench/gate.py --compare`: no regression. The no-FCS path may be
    slower, and the report gives its cost on one silicon case.
-5. `pixi run test` and `pixi run test-kernels` pass. The kernel sets are
+5. `sbz test` and `sbz test-kernels` pass. The kernel sets are
    rebuilt as in T09.
 
 ## Reviewer checks

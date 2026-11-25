@@ -15,10 +15,10 @@ kernel edits. sm_50 has never been run.
 ## Background
 
 - **Two kernel sets.**
-  - `build/sm_35` is built with `pixi run -e kepler build-sm35` (NVRTC
+  - `build/sm_35` is built with `sbz build-sm35` (NVRTC
     11.8).
   - `build/kernels` (22 fatbins: sm_35, sm_50..sm_90, compute_90 PTX) is
-    built with `pixi run build-fatbins`, after the sm_35 set.
+    built with `sbz build-fatbins`, after the sm_35 set.
 - **Which kernel edits each set has seen:**
   - The sm_61 local cubins passed all 11 test scripts and
     `bench/pac_matrix.py` before 692e3f9.
@@ -35,14 +35,15 @@ kernel edits. sm_50 has never been run.
 
 ## Steps
 
-1. On the login node: `pixi run build && pixi run -e kepler build-sm35 &&
-   pixi run build-fatbins`. Check that every directory's `sbz_kernels.id`
+1. On the login node: `sbz build && sbz build-sm35 &&
+   sbz build-fatbins`. Check that every directory's `sbz_kernels.id`
    equals `SBZ_KERNELS_ID` in `src/sbz_kernels_gen.h`.
 2. L40S: `bash tests/run_suite_kernel_dir.sh build/kernels`, and
-   `SLABITZ_KERNEL_DIR=build/kernels pixi run test-kernels`.
+   `SLABITZ_KERNEL_DIR=build/kernels sbz test-kernels`.
 3. crunch (TITAN Black):
-   - `PYTHON=$PWD/.pixi/envs/default/bin/python3 bash
-     tests/run_suite_kernel_dir.sh $PWD/build/kernels`;
+   - `. $SLABITZ_DEV_ROOT/env.sh && cd $SLABITZ_DEV_ROOT/wt/t05-old-cards &&
+     PYTHON=python3 bash tests/run_suite_kernel_dir.sh $PWD/build/kernels`
+     (the root is on GPFS, which crunch mounts);
    - `check_bshuf.py --kernels build/sm_35`;
    - `run_pac_fixtures.py` with each of the two kernel directories.
 4. sm_61 (1050 Ti) and sm_50 (960M): the suite with `build/kernels`;

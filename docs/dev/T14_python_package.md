@@ -75,7 +75,7 @@ membership), `README.md` (Python section), `docs/dev/reports/T14.md`.
 
 ## Acceptance
 
-1. `pixi run pytest tests/test_python.py` passes:
+1. `sbz pytest tests/test_python.py` passes:
    - round trip of the pac zstd and LZ4 fixtures and the real files,
      through `decode` and `decode_device`;
    - hand-off to numpy with `.get()`;
@@ -91,8 +91,9 @@ membership), `README.md` (Python section), `docs/dev/reports/T14.md`.
 
 ## Reviewer checks
 
-- Run `tests/test_python.py` in a fresh pixi environment with cupy
-  installed. Check that the cupy path really ran: there must be no skip
+- Run `tests/test_python.py` in a test venv under
+  `$SLABITZ_DEV_ROOT/tmp/t14-python/` with cupy installed (pip only
+  there, never into the shared env). Check that the cupy path really ran: there must be no skip
   message.
 - `git diff` of `_backend_drv.py` against its source commit shows only the
   header lines.

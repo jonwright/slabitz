@@ -98,7 +98,7 @@ mode for zstd), `docs/dev/reports/T12.md`.
    calls/s for silicon and CeO2 zstd with device input. The report
    compares it with the host-input async path.
 5. `bench/gate.py --compare`: no regression in the existing cells.
-6. `pixi run test` and `pixi run test-kernels` pass. The kernel sets are
+6. `sbz test` and `sbz test-kernels` pass. The kernel sets are
    rebuilt, and the T05 suite runs on the L40S with `build/kernels`.
 
 ## Reviewer checks

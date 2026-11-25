@@ -2,7 +2,7 @@
 
 Status: todo
 Executor: Claude (the harness decides what every later performance claim means)
-Depends on: T01 (T02's fixtures help but are not required)
+Depends on: T01, T00 (synthetic and worst-case cells)
 Branch: `t03-bench-gate`
 
 ## Goal
@@ -60,6 +60,10 @@ Nothing in the repository stores a baseline or compares with one.
   | mask | `mask=0`, `mask=max-1` |
   | mode | sync; async with two contexts; device input (LZ4) |
 
+  Add the synthetic twins of silicon, CeO2 and thaumatin, and the T00
+  worst cases `min_matches`, `short_offsets_1_31`, `random_u16` and
+  `all_max` (from `$SLABITZ_SYNTH`). These cells run without the real data,
+  and the worst cases guard the slow paths that real data does not reach.
   Build the input once, outside the timed loop. When the example data or
   libpac is missing, the cell is reported `missing`, and `--compare` fails
   on `missing` unless `--allow-missing` is given.
@@ -87,7 +91,8 @@ Nothing in the repository stores a baseline or compares with one.
   an idle GPU.
   - **L40S:** made by the committed Slurm script `bench/gate.sbatch`
     (`--partition=low-gpu --gres=gpu:nvidia_l40s:1`). Its output goes under
-    `$SLABITZ_WS/tmp`, never into `workspace/examples`.
+    `$SLABITZ_DEV_ROOT/results/`, never into `data/`. `gpu-run` (T-1) is
+    the interactive equivalent of the sbatch script.
   - **GTX 1050 Ti and TITAN Black:** the user adds these when the hardware
     is available.
 - **Compare.** `bench/gate.py --compare [--baseline FILE]` prints one table

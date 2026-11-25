@@ -86,7 +86,7 @@ treeless; 1 or 4 streams; size formats), 3.1.1.3.2 (sequence table modes).
     after T10; give each one a one-line comment pointing to T09/T10.
   - **Output.** Print the matrix with counts. An empty cell is a failure,
     not a skip. The compared byte count must be nonzero.
-  - Add it to `pixi run test` and to `tests/test_suite.py`. Default
+  - Add it to `sbz test` and to `tests/test_suite.py`. Default
     runtime at most 3 minutes on the L40S.
 - **New `tests/run_roundtrip.py`.** Fixed seed:
   - levels 1-19;
@@ -97,7 +97,7 @@ treeless; 1 or 4 streams; size formats), 3.1.1.3.2 (sequence table modes).
   - byte-exact against `zstandard`.
 
   The default run takes about 2 minutes; `--long` is a soak run. Add it
-  under the pytest `slow` marker, not to `pixi run test`.
+  under the pytest `slow` marker, not to `sbz test`.
 - **Rules.** Do not change `src/`, `kernels/` or `third_party/`. If a test
   finds a decoder bug, record a minimal reproducer in
   `tests/data/features_bugs/` and in the report, mark the entry
@@ -117,7 +117,7 @@ treeless; 1 or 4 streams; size formats), 3.1.1.3.2 (sequence table modes).
    and there are 0 unexpected results.
 2. `timeout 600 python3 tests/run_roundtrip.py` exits 0. It prints the
    number of cases (at least 500) and the compared bytes (nonzero).
-3. `CUDA_ARCH=sm_89 pixi run test` passes and includes `run_features.py`.
+3. `CUDA_ARCH=sm_89 sbz test` passes and includes `run_features.py`.
 4. The report lists every `xfail` entry, with its reproducer path.
 
 ## Reviewer checks

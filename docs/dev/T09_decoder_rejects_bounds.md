@@ -130,7 +130,7 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
    message, and nothing that decoded before fails.
 4. `bench/gate.py --compare`: no cell regresses beyond the gate
    thresholds.
-5. `pixi run test` and `pixi run test-kernels` pass. `build/sm_35` and
+5. `sbz test` and `sbz test-kernels` pass. `build/sm_35` and
    `build/kernels` are rebuilt and the T05 suite is rerun on the L40S with
    `build/kernels`.
 

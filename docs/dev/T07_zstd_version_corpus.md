@@ -54,13 +54,14 @@ input to T09 and T10.
 ## Settled design
 
 - **Builder: `tools/gen_compat_corpus.py`.**
-  - It builds the zstd CLI and libzstd for each version. Build directories
-    and output go under `$SLABITZ_WS/tmp/compat/`, never into the checkout
-    or `workspace/examples`.
+  - It builds the zstd CLI and libzstd for each version. Builds go in
+    `$SLABITZ_DEV_ROOT/toolchains/zstd-<version>/`, and the corpus goes in
+    `$SLABITZ_DEV_ROOT/data/compat/`. These shared root folders are the
+    exception to "write only in your worktree"; this task owns them.
   - Versions: `v1.4.7`, `18d02cbf` (bitshuffle 0.4.0's), `v1.4.9`,
     `v1.5.0`, `v1.5.2`, `v1.5.5`, `v1.5.6`, `v1.5.7` and `v1.6.0`.
   - It also builds bitshuffle 0.4.0 itself (its 0.4.0 commit with that
-    submodule) into a venv under `$SLABITZ_WS/tmp/compat/`, to write
+    submodule) into a venv in `$SLABITZ_DEV_ROOT/toolchains/bitshuffle-0.4.0/`, to write
     filter-32008 zstd chunks with h5py, as a detector pipeline of 2022
     would.
 - **Inputs:**
@@ -91,7 +92,7 @@ input to T09 and T10.
   - The default mode runs on a committed subset, `tests/data/compat/`, at
     most 5 MB. It holds one file per version for levels 3 and 19, the
     no-FCS and window-30 cases (expected reject until T09/T10), and the
-    bitshuffle 0.4.0 chunks. Add it to `pixi run test`.
+    bitshuffle 0.4.0 chunks. Add it to `sbz test`.
 - **Expectations today**, to be updated by T09/T10:
   - no-FCS frames: `reject:SBZ_ERR_CORRUPT`;
   - `--long=30/31`: `reject:SBZ_ERR_CORRUPT`;
@@ -100,7 +101,8 @@ input to T09 and T10.
   Anything else that does not decode is a FAIL: record its reproducer and
   report it. Do not fix the decoder in this task.
 - **Rules.** Do not change `src/`, `kernels/` or `third_party/`. Never
-  read or write outside the checkout and `$SLABITZ_WS/tmp/compat/`.
+  read or write outside `$SLABITZ_DEV_ROOT`. Do not run pixi; pip only
+  inside the bitshuffle 0.4.0 venv.
 
 ## Files that may change
 
@@ -114,14 +116,14 @@ input to T09 and T10.
    the modes. `--build` builds all of them, and the report records the
    time taken and any version that failed to build, with the reason.
 2. `timeout 3600 python3 tests/run_compat.py --full
-   $SLABITZ_WS/tmp/compat/corpus` prints the version x mode table:
+   $SLABITZ_DEV_ROOT/data/compat` prints the version x mode table:
    - every `decode` cell passes;
    - every expected-reject cell gives the expected code;
    - the total compared bytes are nonzero and printed.
    Any FAIL is listed in the report with a reproducer under
    `tests/data/compat_bugs/`.
 3. `du -sh tests/data/compat` is at most 5 MB, and `python3
-   tests/run_compat.py` (subset) passes inside `pixi run test`.
+   tests/run_compat.py` (subset) passes inside `sbz test`.
 4. The report quotes the zstd 1.6.0 CHANGELOG items relevant to the
    format, with a link to the upstream file, and lists the spec changes
    between 1.4.7 and 1.6.0 (`doc/zstd_compression_format.md` git log).

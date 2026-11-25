@@ -47,7 +47,8 @@ answers matter more than any speed-up.
 ## Method
 
 - **Building old kernels.** For the older commits, make a scratch clone
-  (`git worktree add $SLABITZ_WS/tmp/t04-<commit> <commit>`) and build its
+  (`dev-root new t04-at-<commit> <commit>`, a worktree under
+  `$SLABITZ_DEV_ROOT/wt/`) and build its
   kernels there. Each kernel set carries its own `sbz_kernels.id`, so the
   library refuses a mismatched mix. The gate needs its own commit's
   harness: run each commit's own benchmark for pre-gate commits, and record
@@ -78,7 +79,7 @@ item, record the answers in the Status table).
 2. **If a kernel fix lands:**
    - `bench/gate.py --compare` shows the target cell improved;
    - no cell is worse than the T03 thresholds;
-   - `pixi run test`, `pixi run test-kernels` and `run_pac_fixtures.py`
+   - `sbz test`, `sbz test-kernels` and `run_pac_fixtures.py`
      pass;
    - the baseline is refreshed.
 3. The CeO2 item is removed from `AGENTS.md` or restated with the new

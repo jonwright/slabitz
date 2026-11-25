@@ -84,7 +84,7 @@ Choose from that, and record the choice in the report.
    on CeO2 zstd, at 16 frames per call. No other cell regresses beyond the
    gate thresholds. The baseline is refreshed.
 3. **Byte-exact everywhere:**
-   - `pixi run test`, `pixi run test-kernels`, `run_pac_fixtures.py`,
+   - `sbz test`, `sbz test-kernels`, `run_pac_fixtures.py`,
      `run_features.py` and `run_compat.py` (subset and `--full`);
    - `run_roundtrip.py --long` once;
    - `run_gpu_corrupt.py` with no new hangs.

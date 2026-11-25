@@ -3,22 +3,27 @@
 This directory is the single actionable plan. It replaces the "Next steps"
 list that used to be in `AGENTS.md`, and the plans now in `docs/archive/`
 (`plan_p4_api.md`, `plan_p5_tests.md` and the readback audit were folded in
-here; the others were finished). Each task has its own file, `Tnn_*.md`.
+here; the others were finished). Each task has its own file, `Tnn_*.md`
+(T-1 and T00 come first: the shared agent root and the synthetic data).
 Every task file stands alone: it can be executed after a context reset by
 someone who has read only `AGENTS.md`, this file and the task file.
 
 ## Order and status
 
 Do the tasks roughly in order. A task may start once the tasks in its
-"Depends on" line are merged. After T05, four tracks can run in parallel:
+"Depends on" line are merged. T-1 (the agent root) comes before
+everything: until it is done, agents work as before, in
+`/data/id11/jon/hdftest/slabitz-workspace`. After T05, four tracks can run in parallel:
 correctness (T06-T11), API (T12-T16), performance (T20-T21) and encoder
 (T17-T19).
 
 | # | Task | Executor | Depends on | Status |
 |---|---|---|---|---|
-| T01 | [Kernel argument checks for every Python launcher](T01_kernel_arg_checks.md) | Claude | - | todo |
-| T02 | [Test harness: pytest entry, required data, pac fixtures](T02_test_harness.md) | worker | T01 | todo |
-| T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01 | todo |
+| T-1 | [Shared agent root: one env, shared data, one worktree per task](T-1_agent_root.md) | Claude | - | todo |
+| T00 | [Synthetic test data matched to real data, plus worst cases](T00_synthetic_data.md) | Claude (models) + worker | T-1 | todo |
+| T01 | [Kernel argument checks for every Python launcher](T01_kernel_arg_checks.md) | Claude | T-1 | todo |
+| T02 | [Test harness: pytest entry, required data, pac fixtures](T02_test_harness.md) | worker | T01, T00 | todo |
+| T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01, T00 | todo |
 | T04 | [Explain the open performance questions](T04_perf_open_questions.md) | Claude | T03 | todo |
 | T05 | [Portable kernels and old cards re-check](T05_old_cards.md) | worker + user (hardware) | T01 | todo |
 | T06 | [zstd feature matrix with proof of coverage, round trips](T06_zstd_feature_matrix.md) | worker | T02 | todo |
@@ -44,28 +49,37 @@ Executors:
 - **Claude** means the task is subtle: C runtime, concurrency, kernels,
   or design.
 - **worker** means DeepSeek through opencode, as described in the user's
-  CLAUDE.md, in a scratch clone. The task file is then also the worker's
+  CLAUDE.md. After T-1 it runs with its working directory at
+  `$SLABITZ_DEV_ROOT`, in the task worktree `wt/<task>`. The task file is then also the worker's
   brief. Claude reviews the result and re-verifies it before the PR.
 
 ## How to execute a task (for the agent doing it)
 
-1. **Read first.** Read `AGENTS.md` (all of it), this file, and the task
+1. **Start in the root.** After T-1, start at `$SLABITZ_DEV_ROOT`: read
+   `AGENT_START.md`, then `. env.sh`, then `cd wt/<task>`. The reviewer has
+   already created the worktree with `dev-root new <task>`. Use `sbz build`,
+   `sbz test` and so on. Never run pixi, pip or conda, never download, and
+   never read or write outside the root. Real data is in
+   `$SLABITZ_EXAMPLES`, synthetic data in `$SLABITZ_SYNTH`. Time only through
+   `gpu-run`. (The task files say `sbz <task>`; before T-1 that means
+   `pixi run <task>` in the old workspace.)
+2. **Read first.** Read `AGENTS.md` (all of it), this file, and the task
    file. Then read the files the task lists under "Read first".
-2. **Branch.** Work on `tNN-<short-name>`, branched from the current `main`
-   (or from the dev branch named in the task). Never push: the user does
-   all pushes.
-3. **Questions.** This work is non-interactive. Decide small choices
+3. **Branch.** Work on the worktree's branch `tNN-<short-name>`, made from
+   the current `main` (or from the dev branch named in the task). Never
+   push: the user does all pushes.
+4. **Questions.** This work is non-interactive. Decide small choices
    yourself and record each one in the report. If a design choice is not
    settled by the task file, do NOT guess. Write numbered questions to
    `QUESTIONS.txt`, finish the parts that do not depend on the answers,
    and stop.
-4. **Scope.** Keep to "Files that may change". Anything else needs a line
+5. **Scope.** Keep to "Files that may change". Anything else needs a line
    in the report saying why.
-5. **Kernel changes.** If you change a kernel source, follow the
+6. **Kernel changes.** If you change a kernel source, follow the
    `AGENTS.md` rules. Run `tools/build_all.py`, commit the regenerated
    `src/sbz_kernels_gen.h`, and say whether `build/sm_35` and
    `build/kernels` need rebuilding.
-6. **Report.** Write `docs/dev/reports/TNN.md` with these parts:
+7. **Report.** Write `docs/dev/reports/TNN.md` with these parts:
    - what was done, one commit per logical part
    - each acceptance check: the exact command, its output (the numbers),
      and pass or fail
@@ -74,13 +88,17 @@ Executors:
    - open issues
    A check that could not run is reported as "not run" with the reason,
    never as "pass".
-7. **Status.** Set the task's Status line to `review`, and update the
+8. **Status.** Set the task's Status line to `review`, and update the
    Status column in the table above.
 
 ## How to verify a task before merging (for the reviewer)
 
 The reviewer may have no memory of the task. Do not trust the report: rerun.
 
+0. **Where.** After T-1, review in the root: `cd $SLABITZ_DEV_ROOT/wt/<task>`
+   (the agent's worktree), or make a fresh one from its branch with
+   `dev-root new review-<task> <task>`. Run `dev-root update-main` first,
+   and after the merge, `dev-root rm <task>`.
 1. **Diff scope.** Read the task file, then `git diff main...tNN-*`. Every
    changed file must be listed under "Files that may change" or explained
    in the report.
@@ -91,8 +109,8 @@ The reviewer may have no memory of the task. Do not trust the report: rerun.
 3. **Mutation checks.** Run the "Reviewer checks" listed in the task. These
    are deliberate breakages that must make the new tests fail, so they show
    the tests can detect a fault. Revert each one afterwards.
-4. **Full suite.** Run `CUDA_ARCH=sm_89 pixi run test`. Once T01 is merged,
-   also run `pixi run test-kernels`. Once T03 is merged, and the task touches
+4. **Full suite.** Run `CUDA_ARCH=sm_89 sbz test`. Once T01 is merged,
+   also run `sbz test-kernels`. Once T03 is merged, and the task touches
    `kernels/`, `src/` or `tools/transform_ds_for_slang.py`, also run
    `python3 bench/gate.py --compare`.
 5. **Worker drafts.** If the worker drafted the change, the commit message
@@ -106,8 +124,9 @@ The reviewer may have no memory of the task. Do not trust the report: rerun.
 - **Timeouts.** Run every GPU command under `timeout`. A hang is a failure.
 - **Idle GPU.** Before any timing, check `nvidia-smi`: utilisation near 0
   and no large foreign process. The login node's L40S is shared. Use a
-  Slurm job (`--partition=low-gpu --gres=gpu:nvidia_l40s:1`) for numbers
-  that go into a baseline or a report.
+  Slurm job (`gpu-run <cmd>` after T-1, i.e. `--partition=low-gpu
+  --gres=gpu:nvidia_l40s:1`) for numbers that go into a baseline or a
+  report.
 - **Correctness numbers.** Report compared byte counts. A check that
   compared zero bytes is a failure.
 - **Timing numbers.**

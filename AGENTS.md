@@ -9,25 +9,35 @@ Build: `README.md`.
 
 ## Build and test
 
-The checkout is git-only. Builds, pixi, caches and temp files live in an
-external workspace, normally reached through a gitignored symlink:
+Agents work in the shared root `$SLABITZ_DEV_ROOT` (set in the user's
+`~/.bashrc`; maintainer: `/data/id11/jon/hdftest/slabitz`, on GPFS, visible
+from the login node, the Slurm GPU nodes and crunch). `$HOME` is nearly
+full: never put builds, environments, data or worktrees there. The layout
+and tools are defined in `docs/dev/T-1_agent_root.md`:
 
 ```
-./              this checkout (no build, no .pixi)
-./workspace     -> external pixi workspace (large disk; gitignored)
+$SLABITZ_DEV_ROOT/AGENT_START.md    read first
+. $SLABITZ_DEV_ROOT/env.sh          shared env (no pixi on PATH), data variables, sbz, gpu-run
+cd $SLABITZ_DEV_ROOT/wt/<task>      your worktree (made by the reviewer: dev-root new <task>)
+sbz build && sbz test               kernels linked from the shared cache by source key; lib built locally
+gpu-run sbz test                    same on an idle Slurm L40S (all timing goes through this)
 ```
 
-If `workspace/` is absent, create it with `tools/setup_workspace.sh` on a
-large filesystem and link it; do not search the filesystem for test data.
-Treat `workspace/` as read-only: build outputs go to `build/` or a scratch
-directory, never into the example data. `workspace/env.sh` sets
-`SLABITZ_EXAMPLES` to the read-only example data.
+Shared and read-only: the environment (`env/`), slangc (`shared/slang`),
+real data (`data/real`, `$SLABITZ_EXAMPLES`), synthetic data
+(`data/synth/current`, `$SLABITZ_SYNTH`), toolchains, related repositories
+(`ext/`: pac-zstd with `$PAC_LIB`, bslz4_to_sparse), and `main/`. Write only
+in your worktree and `tmp/<task>`. Never run pixi, pip or conda, and never
+download: a missing dependency goes into QUESTIONS.txt. Do not search the
+filesystem for test data.
 
-```bash
-. workspace/env.sh && cd workspace/slabitz   # build/test checkout
-CUDA_ARCH=sm_89 pixi run test                # kernels, lib, 11 test scripts
-pixi run python3 tests/<name>.py             # any single test; all run from any cwd
-```
+Until T-1 is done, the old single workspace is
+`/data/id11/jon/hdftest/slabitz-workspace` (`. env.sh && cd slabitz &&
+CUDA_ARCH=sm_89 pixi run test`). Its `examples` link lacks the thaumatin
+files, which live in
+`/data/id11/jon/hdftest/zenodo_2412270_dls_i04_eiger2_16m_thaumatin/`.
+Outside ESRF, `tools/setup_workspace.sh` still makes a single-checkout
+workspace (see README.md).
 
 Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 
@@ -53,6 +63,8 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | Per-kernel Python scripts | 6 of 24 pass outdated argument lists (found 2026-11-25; none is in `pixi run test`): T01 |
 | Performance regression gate | none: numbers live in prose, no stored baseline: T03 |
 | Compression | not started; LZ4 then zstd: T17-T19 |
+| Agent environment | each agent sets up pixi and data itself (recurring failures): shared root T-1 |
+| Synthetic data | only small hand-made chunks in `data/`: matched twins and worst cases T00 |
 
 Output lives on the device (`UnCompressedFramesData` / `BshufOutput`);
 `sbz_dctx_read_buffer` copies a named buffer back (also the debug hook for
