@@ -254,7 +254,10 @@ init_ext() {
         fi
     done
     if [ -d "$ROOT/ext/pac-zstd" ] && [ ! -f "$ROOT/ext/pac-zstd/build/libpac.so" ]; then
-        in_env "$ROOT/ext/pac-zstd" make
+        # submodules (zstd, lz4, kcb) from GitHub: admin step, network. BUILD=build because
+        # the conda compiler activation exports its own BUILD variable.
+        git -C "$ROOT/ext/pac-zstd" submodule update --init --quiet
+        in_env "$ROOT/ext/pac-zstd" make BUILD=build
     fi
 }
 
