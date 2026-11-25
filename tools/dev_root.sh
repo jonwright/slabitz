@@ -100,7 +100,15 @@ fix_shebangs() {
     local f
     for f in "$ROOT"/env/.pixi/envs/*/bin/*; do
         [ -f "$f" ] && [ ! -L "$f" ] || continue
-        if [ "$(head -c 11 "$f" 2>/dev/null)" = "#!/gpfs/gd/" ]; then sed -i '1s|^#!/gpfs/gd/|#!/|' "$f"; fi
+        if head -c 11 "$f" 2>/dev/null | grep -q -a '^#!/gpfs/gd/'; then sed -i '1s|^#!/gpfs/gd/|#!/|' "$f"; fi
+    done
+}
+
+# git writes canonical paths into worktree links; crunch sees /data only
+fix_gitdirs() {
+    local f
+    for f in "$ROOT"/repo.git/worktrees/*/gitdir "$ROOT"/main/.git "$ROOT"/env/.git "$ROOT"/wt/*/.git; do
+        [ -f "$f" ] && sed -i 's|/gpfs/gd/|/|' "$f"
     done
 }
 
@@ -160,6 +168,7 @@ init_repo() {
     for d in main env; do
         if [ ! -d "$ROOT/$d" ]; then
             repo worktree add --detach "$ROOT/$d" "$MAIN_REF" >/dev/null
+            fix_gitdirs
         fi
     done
 }
@@ -354,6 +363,7 @@ cmd_new() {
     [ ! -e "$ROOT/wt/$task" ] || die "wt/$task exists"
     repo worktree add -b "$task" "$ROOT/wt/$task" "$base" >/dev/null
     mkdir -p "$ROOT/tmp/$task"
+    fix_gitdirs
     in_env "$ROOT/wt/$task" bash tools/sbz.sh setup
     in_env "$ROOT/wt/$task" bash tools/sbz.sh build
     echo "$ROOT/wt/$task"
