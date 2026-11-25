@@ -1,0 +1,258 @@
+
+=== silicon: 12 frames (2162, 2068) uint16 ===
+  P1 class 0                     twin 0.99494      real 0.99501      PASS
+  P1 class 1                     twin 0.0050028    real 0.0048554    PASS
+  P1 class 2-3                   twin 3.1948e-05   real 0.0001029    PASS
+  P1 class 4-15                  twin 2.4015e-05   real 2.5939e-05   PASS
+  P1 class 16-255                twin 5.2949e-06   real 7.397e-06    PASS
+  P1 class 256-4095              twin 6.5442e-07   real 7.9324e-07   PASS
+  P1 class >=4096                twin 1.9831e-08   real 5.9493e-08   PASS
+  P1 mean up to clip 2           twin 0.0050317    real 0.0050279    PASS
+  P1 hot fraction                twin 4.7614e-05   real 5.0985e-05   PASS
+  P1 masked fraction             twin 0.060128     real 0.060128     PASS
+  P1 JSD                         twin 0.0046478    real 0            PASS
+  (live mean incl. hot: twin 0.006313 real 0.007034; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0.93066      real 0.92285      PASS
+  P3 eq-prev planes 8k           twin 0.00097656   real 0            PASS
+  P3 zero planes 256k            twin 0.76367      real 0.84375      FAIL
+  P3 eq-prev planes 256k         twin 0.0078125    real 0            PASS
+  P4 ratio lz4_8k                twin 58.673       real 60.104       PASS
+  P4 ratio zstd2_256k            twin 186.61       real 191.46       PASS
+  P4 literal frac zstd2_256k     twin 0.50155      real 0.50158      PASS
+  P4 off1 frac zstd2_256k        twin 0.00077248   real 0.0015717    PASS
+  P4 offP frac zstd2_256k        twin 0            real 0            PASS
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 29, 'compressed': 40} real {'raw': 0, 'rle': 34, 'compressed': 35}
+  P4 ratio zstd3_256k            twin 186.29       real 191.08       PASS
+  P4 literal frac zstd3_256k     twin 0.50151      real 0.5015       PASS
+  P4 off1 frac zstd3_256k        twin 0.0010691    real 0.0014095    PASS
+  P4 offP frac zstd3_256k        twin 0            real 0            PASS
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 29, 'compressed': 40} real {'raw': 0, 'rle': 34, 'compressed': 35}
+  P4 ratio pac_lz4               twin 63.028       real 65.42        PASS
+  P4 ratio pac_zstd              twin 256.8        real 260.39       PASS
+
+=== ceo2: 12 frames (2162, 2068) uint32 ===
+  P1 class 0                     twin 1.2196e-05   real 1.7431e-05   PASS
+  P1 class 1                     twin 4.454e-05    real 6.0088e-05   PASS
+  P1 class 2-3                   twin 0.00019448   real 0.0002318    PASS
+  P1 class 4-15                  twin 0.00036604   real 0.00035888   PASS
+  P1 class 16-255                twin 0.99603      real 0.99561      PASS
+  P1 class 256-4095              twin 0.0033561    real 0.0037157    PASS
+  P1 class >=4096                twin 1.1899e-06   real 1.5666e-06   PASS
+  P1 mean up to clip 1207        twin 71.321       real 71.291       PASS
+  P1 hot fraction                twin 9.5585e-05   real 9.8818e-05   PASS
+  P1 masked fraction             twin 0.060128     real 0.060128     PASS
+  P1 JSD                         twin 0.028719     real 0            PASS
+  (live mean incl. hot: twin 71.47 real 71.45; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0.75439      real 0.72656      PASS
+  P3 eq-prev planes 8k           twin 0.00048828   real 0.00048828   PASS
+  P3 zero planes 256k            twin 0.71533      real 0.68994      PASS
+  P3 eq-prev planes 256k         twin 0            real 0            PASS
+  P4 ratio lz4_8k                twin 4.6416       real 4.5517       PASS
+  P4 ratio zstd2_256k            twin 4.9683       real 4.8919       PASS
+  P4 literal frac zstd2_256k     twin 0.68802      real 0.68935      PASS
+  P4 off1 frac zstd2_256k        twin 0.00049782   real 0.00040054   PASS
+  P4 offP frac zstd2_256k        twin 1.4305e-05   real 7.6294e-06   PASS
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 68, 'compressed': 69} real {'raw': 0, 'rle': 68, 'compressed': 69}
+  P4 ratio zstd3_256k            twin 4.9693       real 4.8885       PASS
+  P4 literal frac zstd3_256k     twin 0.68327      real 0.68348      PASS
+  P4 off1 frac zstd3_256k        twin 0.00072289   real 0.00068951   PASS
+  P4 offP frac zstd3_256k        twin 1.4305e-05   real 1.3351e-05   PASS
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 68, 'compressed': 69} real {'raw': 0, 'rle': 68, 'compressed': 69}
+  P4 ratio pac_lz4               twin 4.7036       real 4.5997       PASS
+  P4 ratio pac_zstd              twin 5.2072       real 5.1217       PASS
+
+=== thaumatin: 12 frames (4362, 4148) uint16 ===
+  P1 class 0                     twin 0.97344      real 0.97358      PASS
+  P1 class 1                     twin 0.025867     real 0.025691     PASS
+  P1 class 2-3                   twin 0.00062704   real 0.00066318   PASS
+  P1 class 4-15                  twin 5.0954e-05   real 5.3142e-05   PASS
+  P1 class 16-255                twin 1.3212e-05   real 1.5726e-05   PASS
+  P1 class 256-4095              twin 2.6722e-07   real 1.9299e-07   PASS
+  P1 class >=4096                twin 2.4742e-08   real 3.4639e-08   PASS
+  P1 mean up to clip 3           twin 0.027139     real 0.027058     PASS
+  P1 hot fraction                twin 6.4459e-05   real 6.9095e-05   PASS
+  P1 masked fraction             twin 0.069269     real 0.069269     PASS
+  P1 JSD                         twin 0.0019303    real 0            PASS
+  (live mean incl. hot: twin 0.02951 real 0.03015; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0            real 0            PASS
+  P3 eq-prev planes 8k           twin 0.82129      real 0.82422      PASS
+  P3 zero planes 256k            twin 0            real 0            PASS
+  P3 eq-prev planes 256k         twin 0.68262      real 0.67676      PASS
+  P4 ratio lz4_8k                twin 21.7         real 21.865       PASS
+  P4 ratio zstd2_256k            twin 50.693       real 50.965       PASS
+  P4 literal frac zstd2_256k     twin 0.0040064    real 0.0042372    PASS
+  P4 off1 frac zstd2_256k        twin 0.00057411   real 0.00051308   PASS
+  P4 offP frac zstd2_256k        twin 0.35303      real 0.21755      FAIL
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 2, 'compressed': 281} real {'raw': 0, 'rle': 2, 'compressed': 281}
+  P4 ratio zstd3_256k            twin 49.727       real 50.021       PASS
+  P4 literal frac zstd3_256k     twin 0.0036831    real 0.0038719    PASS
+  P4 off1 frac zstd3_256k        twin 0.00063038   real 0.00037766   PASS
+  P4 offP frac zstd3_256k        twin 0.36802      real 0.21755      FAIL
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 2, 'compressed': 281} real {'raw': 0, 'rle': 2, 'compressed': 281}
+  P4 ratio pac_lz4               twin 22.742       real 22.982       PASS
+  P4 ratio pac_zstd              twin 67.805       real 68.223       PASS
+
+=== eiger4m_u32: 12 frames (2162, 2068) uint32 ===
+  P1 class 0                     twin 0.99941      real 0.99942      PASS
+  P1 class 1                     twin 0.00057136   real 0.0005381    PASS
+  P1 class 2-3                   twin 5.6521e-06   real 1.9316e-05   PASS
+  P1 class 4-15                  twin 1.293e-05    real 1.3049e-05   PASS
+  P1 class 16-255                twin 4.0655e-06   real 5.4736e-06   PASS
+  P1 class 256-4095              twin 4.363e-07    real 4.363e-07    PASS
+  P1 class >=4096                twin 0            real 3.9664e-08   PASS
+  P1 mean up to clip 2           twin 0.00057169   real 0.00056497   PASS
+  P1 hot fraction                twin 2.2926e-05   real 2.4889e-05   PASS
+  P1 masked fraction             twin 0.060172     real 0.060172     PASS
+  P1 JSD                         twin 0.0025841    real 0            PASS
+  (live mean incl. hot: twin 0.001172 real 0.001474; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0.5          real 0.5          PASS
+  P3 eq-prev planes 8k           twin 0.44531      real 0.44775      PASS
+  P3 zero planes 256k            twin 0.5          real 0.5          PASS
+  P3 eq-prev planes 256k         twin 0.40967      real 0.41504      PASS
+  P4 ratio lz4_8k                twin 93.082       real 94.578       PASS
+  P4 ratio zstd2_256k            twin 498.64       real 513.9        PASS
+  P4 literal frac zstd2_256k     twin 0.12534      real 0.50032      FAIL
+  P4 off1 frac zstd2_256k        twin 0.0021791    real 0.0017681    PASS
+  P4 offP frac zstd2_256k        twin 0.11292      real 0.11143      PASS
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 42, 'compressed': 95} real {'raw': 0, 'rle': 42, 'compressed': 95}
+  P4 ratio zstd3_256k            twin 497.61       real 515.12       PASS
+  P4 literal frac zstd3_256k     twin 0.12534      real 0.50031      FAIL
+  P4 off1 frac zstd3_256k        twin 0.0020208    real 0.0017681    PASS
+  P4 offP frac zstd3_256k        twin 0.11799      real 0.11143      PASS
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 39, 'compressed': 98} real {'raw': 0, 'rle': 41, 'compressed': 96}
+  P4 ratio pac_lz4               twin 126.24       real 128.87       PASS
+  P4 ratio pac_zstd              twin 616.66       real 639.61       PASS
+
+=== big_eiger: 12 frames (2162, 2068) uint16 ===
+  P1 class 0                     twin 0.99954      real 0.99955      PASS
+  P1 class 1                     twin 0.00045976   real 0.00044913   PASS
+  P1 class 2-3                   twin 2.7763e-07   real 5.5526e-07   PASS
+  P1 class 4-15                  twin 0            real 0            PASS
+  P1 class 16-255                twin 0            real 0            PASS
+  P1 class 256-4095              twin 0            real 0            PASS
+  P1 class >=4096                twin 0            real 0            PASS
+  P1 mean up to clip 2           twin 0.00046031   real 0.00045024   PASS
+  P1 hot fraction                twin 0            real 0            PASS
+  P1 masked fraction             twin 0.060123     real 0.060123     PASS
+  P1 JSD                         twin 0.00028086   real 0            PASS
+  (live mean incl. hot: twin 0.0004603 real 0.0004502; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0            real 0            PASS
+  P3 eq-prev planes 8k           twin 0.88477      real 0.89062      PASS
+  P3 zero planes 256k            twin 0            real 0            PASS
+  P3 eq-prev planes 256k         twin 0.87207      real 0.87012      PASS
+  P4 ratio lz4_8k                twin 72.142       real 72.489       PASS
+  P4 ratio zstd2_256k            twin 419.46       real 434.58       PASS
+  P4 literal frac zstd2_256k     twin 0.0004425    real 0.00043964   PASS
+  P4 off1 frac zstd2_256k        twin 0.002161     real 0.0017633    PASS
+  P4 offP frac zstd2_256k        twin 0.2222       real 0.23297      PASS
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 0, 'compressed': 71} real {'raw': 0, 'rle': 0, 'compressed': 71}
+  P4 ratio zstd3_256k            twin 421.54       real 433.06       PASS
+  P4 literal frac zstd3_256k     twin 0.0004425    real 0.0004158    PASS
+  P4 off1 frac zstd3_256k        twin 0.002161     real 0.0017633    PASS
+  P4 offP frac zstd3_256k        twin 0.2222       real 0.43591      FAIL
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 0, 'compressed': 71} real {'raw': 0, 'rle': 0, 'compressed': 71}
+  P4 ratio pac_lz4               twin 92.644       real 93.193       PASS
+  P4 ratio pac_zstd              twin 389.37       real 392.96       PASS
+
+=== kevlar: 12 frames (2167, 2070) uint16 ===
+  P1 class 0                     twin 0.60247      real 0.60277      PASS
+  P1 class 1                     twin 0.20522      real 0.21395      PASS
+  P1 class 2-3                   twin 0.13184      real 0.12785      PASS
+  P1 class 4-15                  twin 0.059236     real 0.052864     FAIL
+  P1 class 16-255                twin 0.0012297    real 0.002552     FAIL
+  P1 class 256-4095              twin 4.6043e-06   real 8.8741e-06   PASS
+  P1 class >=4096                twin 5.903e-08    real 1.3774e-07   PASS
+  P1 mean up to clip 31          twin 0.87677      real 0.87562      PASS
+  P1 hot fraction                twin 9.0237e-05   real 0.00010094   PASS
+  P1 masked fraction             twin 0.055851     real 0.055851     PASS
+  P1 JSD                         twin 0.022968     real 0            PASS
+  (live mean incl. hot: twin 0.8885 real 0.8947; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0            real 0            PASS
+  P3 eq-prev planes 8k           twin 0.69583      real 0.74896      FAIL
+  P3 zero planes 256k            twin 0            real 0            PASS
+  P3 eq-prev planes 256k         twin 0.6582       real 0.70801      PASS
+  P4 ratio lz4_8k                twin 8.1421       real 8.2127       PASS
+  P4 ratio zstd2_256k            twin 10.785       real 10.89        PASS
+  P4 literal frac zstd2_256k     twin 0.01123      real 0.010441     PASS
+  P4 off1 frac zstd2_256k        twin 0.00029659   real 0.00061703   PASS
+  P4 offP frac zstd2_256k        twin 0.20844      real 0.20409      PASS
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 0, 'compressed': 71} real {'raw': 0, 'rle': 0, 'compressed': 71}
+  P4 ratio zstd3_256k            twin 10.686       real 10.788       PASS
+  P4 literal frac zstd3_256k     twin 0.0079584    real 0.0075054    PASS
+  P4 off1 frac zstd3_256k        twin 0.0016642    real 0.00080109   PASS
+  P4 offP frac zstd3_256k        twin 0.41032      real 0.40559      PASS
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 0, 'compressed': 71} real {'raw': 0, 'rle': 0, 'compressed': 71}
+  P4 ratio pac_lz4               twin 8.0626       real 8.1458       PASS
+  P4 ratio pac_zstd              twin 11.367       real 11.487       PASS
+
+=== hplc: 12 frames (1679, 1475) int32 ===
+  P1 class 0                     twin 0.089922     real 0.094469     PASS
+  P1 class 1                     twin 0.034639     real 0.033027     PASS
+  P1 class 2-3                   twin 0.026042     real 0.023594     FAIL
+  P1 class 4-15                  twin 0.77257      real 0.7755       PASS
+  P1 class 16-255                twin 0.076624     real 0.073154     PASS
+  P1 class 256-4095              twin 0.00019816   real 0.00019859   PASS
+  P1 class >=4096                twin 1.9095e-07   real 4.5827e-07   PASS
+  P1 mean up to clip 470         twin 9.4366       real 9.3906       PASS
+  P1 hot fraction                twin 6.9925e-05   real 9.28e-05     PASS
+  P1 masked fraction             twin 0.11888      real 0.11888      PASS
+  P1 JSD                         twin 0.013289     real 0            PASS
+  (live mean incl. hot: twin 9.493 real 9.483; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0            real 0            PASS
+  P3 eq-prev planes 8k           twin 0.80957      real 0.78369      PASS
+  P3 zero planes 256k            twin 0            real 0            PASS
+  P3 eq-prev planes 256k         twin 0.76855      real 0.80176      PASS
+  P4 ratio lz4_8k                twin 7.2088       real 7.2917       PASS
+  P4 ratio zstd2_256k            twin 8.2623       real 8.3536       PASS
+  P4 literal frac zstd2_256k     twin 0.095357     real 0.092216     PASS
+  P4 off1 frac zstd2_256k        twin 0.00063324   real 0.00076389   PASS
+  P4 offP frac zstd2_256k        twin 0.38275      real 0.58141      FAIL
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 0, 'compressed': 76} real {'raw': 0, 'rle': 0, 'compressed': 76}
+  P4 ratio zstd3_256k            twin 8.293        real 8.3841       PASS
+  P4 literal frac zstd3_256k     twin 0.091116     real 0.088708     PASS
+  P4 off1 frac zstd3_256k        twin 0.00062943   real 0.00075054   PASS
+  P4 offP frac zstd3_256k        twin 0.38266      real 0.39827      PASS
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 0, 'compressed': 76} real {'raw': 0, 'rle': 0, 'compressed': 76}
+  P4 ratio pac_lz4               twin 7.2932       real 7.3744       PASS
+  P4 ratio pac_zstd              twin 8.8162       real 8.9492       PASS
+
+=== al2o3: 10 frames (2167, 2070) uint32 ===
+  P1 class 0                     twin 0.24711      real 0.26722      PASS
+  P1 class 1                     twin 0.28634      real 0.30445      PASS
+  P1 class 2-3                   twin 0.31306      real 0.31241      PASS
+  P1 class 4-15                  twin 0.14436      real 0.10812      FAIL
+  P1 class 16-255                twin 0.0085938    real 0.0071904    FAIL
+  P1 class 256-4095              twin 0.00047795   real 0.00054353   PASS
+  P1 class >=4096                twin 5.1399e-05   real 6.9808e-05   PASS
+  P1 mean up to clip 2759        twin 2.5181       real 2.3215       FAIL
+  P1 hot fraction                twin 7.8764e-05   real 9.8874e-05   PASS
+  P1 masked fraction             twin 0.056637     real 0.056637     PASS
+  P1 JSD                         twin 0.066024     real 0            FAIL
+  (live mean incl. hot: twin 3.001 real 2.987; not a check: a few pixels dominate it)
+  P3 zero planes 8k              twin 0.85677      real 0.82031      PASS
+  P3 eq-prev planes 8k           twin 0            real 0.00052083   PASS
+  P3 zero planes 256k            twin 0.78076      real 0.6748       FAIL
+  P3 eq-prev planes 256k         twin 0            real 0            PASS
+  P4 ratio lz4_8k                twin 10.163       real 10.185       PASS
+  P4 ratio zstd2_256k            twin 12.372       real 12.65        PASS
+  P4 literal frac zstd2_256k     twin 0.56412      real 0.56027      PASS
+  P4 off1 frac zstd2_256k        twin 0.00067711   real 0.00069237   PASS
+  P4 offP frac zstd2_256k        twin 0            real 0.00051785   PASS
+  P4 block mix zstd2_256k: twin {'raw': 0, 'rle': 68, 'compressed': 69} real {'raw': 0, 'rle': 68, 'compressed': 69}
+  P4 ratio zstd3_256k            twin 12.358       real 12.633       PASS
+  P4 literal frac zstd3_256k     twin 0.56064      real 0.55715      PASS
+  P4 off1 frac zstd3_256k        twin 0.0007267    real 0.0011282    PASS
+  P4 offP frac zstd3_256k        twin 0            real 0            PASS
+  P4 block mix zstd3_256k: twin {'raw': 0, 'rle': 67, 'compressed': 70} real {'raw': 0, 'rle': 68, 'compressed': 69}
+  P4 ratio pac_lz4               twin 10.324       real 10.335       PASS
+  P4 ratio pac_zstd              twin 12.865       real 13.305       PASS
+
+== SUMMARY ==
+  silicon      FAIL
+  ceo2         pass
+  thaumatin    FAIL
+  eiger4m_u32  FAIL
+  big_eiger    FAIL
+  kevlar       FAIL
+  hplc         FAIL
+  al2o3        FAIL
