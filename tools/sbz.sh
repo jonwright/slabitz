@@ -87,12 +87,18 @@ cmd_setup() {
     fi
 }
 
-publish() {  # publish <staging dir> <key> <name>: atomic, write-once
+publish() {  # publish <staging dir> <key> <name>: atomic, write-once; returns 0 only if the set is in the cache
     local stage="$1" k="$2" name="$3" dest="$ROOT/kernels/$2/$3"
     mkdir -p "$ROOT/kernels/$k"
     if [ -e "$dest" ]; then rm -rf "$stage"; return 0; fi   # somebody published it meanwhile
-    chmod -R a-w "$stage"
-    mv -T "$stage" "$dest" 2>/dev/null || { chmod -R u+w "$stage"; rm -rf "$stage"; }
+    # move first, then make read-only (moving a directory needs write permission on it)
+    if mv -T "$stage" "$dest"; then
+        chmod -R a-w "$dest"
+        return 0
+    fi
+    if [ -e "$dest" ]; then rm -rf "$stage"; return 0; fi
+    echo "sbz: could not publish $dest" >&2
+    return 1
 }
 
 stage_dir() { mktemp -d "$ROOT/tmp/publish.XXXXXX"; }
@@ -133,7 +139,7 @@ publish_arch() {  # publish build/<sub>/<cubin> as <key>/<arch>
     done < <(kernel_files)
     cp build/sbz_kernels.id "$stage/sbz_kernels.id"
     cp src/sbz_kernels_gen.h "$stage/sbz_kernels_gen.h"
-    publish "$stage" "$k" "$arch"
+    publish "$stage" "$k" "$arch" || die "publish failed"
     echo "kernels: published $k/$arch"
 }
 
@@ -194,7 +200,7 @@ cmd_build_sm35() {
             cp "build/sm_35/$f" "$stage/$f"
         done < <(kernel_files)
         cp build/sm_35/sbz_kernels.id "$stage/sbz_kernels.id"
-        publish "$stage" "$k" sm_35
+        publish "$stage" "$k" sm_35 || die "publish failed"
         echo "kernels: published $k/sm_35"
     fi
 }
@@ -218,7 +224,7 @@ cmd_build_fatbins() {
     if [ "$ROOT_MODE" = 1 ] && [ ! -e "$set" ]; then
         stage="$(stage_dir)"
         cp -r build/kernels/. "$stage/"
-        publish "$stage" "$k" kernels
+        publish "$stage" "$k" kernels || die "publish failed"
         echo "kernels: published $k/kernels"
     fi
 }
