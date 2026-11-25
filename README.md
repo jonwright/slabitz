@@ -22,7 +22,27 @@ bitshuffle-zstd format. This repository is the result: a port of Microsoft's
 DirectStorage GPU zstd decoder (MIT) into the Slang language and then CUDA,
 with work in progress to make it run on older cards too.
 
-## Quick start (pixi)
+## Quick start
+
+### At ESRF and for development agents: the shared root
+
+Development (Claude, the DeepSeek worker, reviewers) happens in one shared root
+folder, `$SLABITZ_DEV_ROOT`, set in `~/.bashrc`. It holds the environment, the Slang
+compiler, the real and synthetic test data, built kernel sets and one git worktree per
+task, so nobody sets up pixi, downloads data or rebuilds kernels. Layout and rules:
+`docs/dev/T-1_agent_root.md`; the first file an agent reads is
+`$SLABITZ_DEV_ROOT/AGENT_START.md`.
+
+```bash
+cd $SLABITZ_DEV_ROOT/wt/<task> && . $SLABITZ_DEV_ROOT/env.sh
+sbz build && sbz test            # kernels linked from the shared cache, library built here
+gpu-run sbz test                 # the same on an idle Slurm L40S
+```
+
+The maintainer creates the root once with `tools/dev_root.sh init` (see its header) and
+makes task worktrees with `dev-root new <task>`.
+
+### Anywhere else: pixi
 
 The checkout is git-only. Pixi, its package cache, build temp files and the
 environment live in a separate workspace. The usual layout is a gitignored
@@ -60,8 +80,8 @@ zstandard, h5py, hdf5plugin, bitshuffle, gcc 13 and CUDA 12.6 (nvcc, NVRTC)
 from conda-forge. The host must provide only the NVIDIA driver
 (`libcuda.so.1`) for CUDA 12.x.
 
-Tasks: `pixi run fetch-slangc`, `pixi run build` (= `build-kernels` +
-`build-lib`), `pixi run test`.
+Tasks: `pixi run fetch-slangc`, `pixi run build`, `pixi run test`. Each calls
+`tools/sbz.sh`, the same runner the shared root uses as `sbz`.
 
 ## Kernels for any card
 
