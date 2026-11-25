@@ -163,8 +163,12 @@ if [ -n "${SLABITZ_DEV_ROOT:-}" ] && [ "$SLABITZ_DEV_ROOT" != "$_sbz_here" ]; th
 fi
 export SLABITZ_DEV_ROOT="$_sbz_here"
 unset _sbz_here
+# the conda activation scripts are not safe under `set -u`
+case "$-" in *u*) _sbz_u=1; set +u ;; *) _sbz_u=0 ;; esac
 # shellcheck disable=SC1091
 . "$SLABITZ_DEV_ROOT/env/activate.sh"
+[ "$_sbz_u" = 1 ] && set -u
+unset _sbz_u
 export SLABITZ_ENV_ACTIVE=1
 export SLABITZ_EXAMPLES="$SLABITZ_DEV_ROOT/data/real"
 export SLABITZ_SYNTH="$SLABITZ_DEV_ROOT/data/synth/current"
