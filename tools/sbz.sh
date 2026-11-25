@@ -33,8 +33,8 @@ die() { echo "sbz: $*" >&2; exit 2; }
 require_env() {
     if [ "$ROOT_MODE" = 1 ]; then
         [ "${SLABITZ_ENV_ACTIVE:-}" = 1 ] || die "the shared environment is not active: run  . $ROOT/env.sh"
-        case "$REPO" in
-            "$ROOT"/*) ;;
+        case "$(readlink -f "$REPO")" in
+            "$(readlink -f "$ROOT")"/*) ;;
             *) [ "${SBZ_ALLOW_OUTSIDE:-}" = 1 ] ||
                 die "$REPO is outside $ROOT (set SBZ_ALLOW_OUTSIDE=1 only if you are the maintainer)" ;;
         esac
