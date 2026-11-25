@@ -184,7 +184,9 @@ cmd_build_sm35() {
     nvrtc="${SLABITZ_KEPLER_NVRTC:-${CONDA_PREFIX:-}/lib/libnvrtc.so}"
     [ -f "$nvrtc" ] || die "no NVRTC 11.8 (set SLABITZ_KEPLER_NVRTC)"
     if [ -L build/sm_35 ]; then rm -f build/sm_35; fi
-    python3 tools/build_kubins.py --arch sm_35 --out build/sm_35 --nvrtc "$nvrtc"
+    # libnvrtc 11.8 finds its libnvrtc-builtins next to itself only through the loader path
+    LD_LIBRARY_PATH="$(dirname "$nvrtc")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        python3 tools/build_kubins.py --arch sm_35 --out build/sm_35 --nvrtc "$nvrtc"
     if [ "$ROOT_MODE" = 1 ] && [ ! -e "$set" ]; then
         stage="$(stage_dir)"
         while read -r f; do
