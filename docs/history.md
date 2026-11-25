@@ -123,7 +123,7 @@ output element by element with the reference and the oracle.
     1.9 ms at 4/call but 2.75 ms at 16/call. What remains is DS's own shape:
     DecompressSequences (one thread per block) and ExecuteSequences (one
     workgroup per frame) set a ~5 ms latency floor per call on Kepler.
-20. **Bitshuffle-LZ4** (`docs/plan_lz4_slang.md`). Phase 1 (worker): a Slang
+20. **Bitshuffle-LZ4** (`docs/archive/plan_lz4_slang.md`). Phase 1 (worker): a Slang
     port of the nvCOMP LZ4 block decoder used by bslz4_to_sparse, one 32-lane
     group per block, writing into the buffer the zstd path's unshuffle reads;
     `gz_dctx_bslz4_decompress`, byte-exact vs hdf5plugin on L40S and TITAN
@@ -158,8 +158,8 @@ output element by element with the reference and the oracle.
     max(upload, device) per frame: LZ4 CeO2 is PCIe-bound, everything else
     device-bound.
 24. **Host walk hardened, portable kernels** (two worker jobs run in
-    parallel from written plans, `docs/plan_host_walk.md` and
-    `docs/plan_fatbin.md`). The first launch of both died at once: the
+    parallel from written plans, `docs/archive/plan_host_walk.md` and
+    `docs/archive/plan_fatbin.md`). The first launch of both died at once: the
     brief pointed at helper scripts outside the clone, and opencode's file
     tools refuse those (exit 0, nothing done). The host-walk worker then
     stopped after reading the files and needed one follow-up. The review of
@@ -212,6 +212,24 @@ output element by element with the reference and the oracle.
     up to 3.73x faster on `maskmax-1`, `Literals` -21% to -24%, stock
     unchanged or faster; SPIR-V/Metal compile clean). Added real zstd HDF5
     file checks to `tests/run_bshuf_chain.py`.
+29. **Merged-match copies, the bench fix, and a plan review** (2026-11-22 to
+    2026-11-25). pac-zstd 0.2.0 merges sequences, so `copyLen > seq.offs`;
+    the vector path fell back to bytes (silicon_u32 ExecuteSequences 1776 ->
+    6570 us) until 692e3f9 copied in `offs`-sized pieces (PR #2; 2321 us,
+    still 30% above pac 0.1, unexplained). PR #3 (da0452f) gave
+    `bench/execute_bench.py` the 17 ExecuteSequences arguments. A review on
+    2026-11-25 found six more per-kernel scripts with outdated argument
+    lists (none in `pixi run test`), no stored performance baseline, the
+    "stock unchanged" claim of b840caa contradicted by its own table (2-4%
+    slower on some cells, one run), and decoder gaps against full zstd
+    (no-FCS frames, windows >= 2^29, host/GPU reject mismatch, no FCS bound,
+    corpus from libzstd 1.5.7 only). The version floor was traced to
+    bitshuffle 0.4.0's bundled zstd, `18d02cbf` (v1.4.7-403, 2021-05-27).
+    The plans were merged into one ordered task list, `docs/dev/` (T01-T22,
+    each with measurable acceptance and reviewer checks); finished and
+    folded plans moved to `docs/archive/`. New scope: a regression gate,
+    the bslz4_to_sparse decoder hook as the friendly API, and GPU
+    compression (LZ4 first, then zstd).
 
 ## Publication snapshot
 

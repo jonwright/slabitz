@@ -1,4 +1,4 @@
-# AGENTS.md: slabitz status and next steps
+# AGENTS.md: slabitz status, rules and plan pointer
 
 GPU decoders for bitshuffle-zstd and bitshuffle-LZ4 HDF5 chunks (filter 32008,
 e.g. pac output). Microsoft DirectStorage (DS) GPU zstd shaders (HLSL),
@@ -31,7 +31,7 @@ pixi run python3 tests/<name>.py             # any single test; all run from any
 
 Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 
-## Status (2026-11-21)
+## Status (2026-11-25)
 
 | Area | State |
 |---|---|
@@ -39,15 +39,20 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | C chain: `sbz_dctx_decompress` (concatenated frames) | byte-exact vs libzstd, 11 cases |
 | `sbz_dctx_decompress_frames` (explicit frame list) | byte-exact, real hdf5plugin chunks |
 | `sbz_dctx_bshuf_decompress` (bitshuffle-zstd chunks) | matches hdf5plugin, u8-u64, 8k/248k/256k blocks, tails, corrupt input -> error |
-| `sbz_dctx_bslz4_decompress` (bitshuffle-LZ4 chunks, `kernels/Lz4DecodeBlocks.slang`, fused `kernels/Lz4DecodeUnshuffle.slang` for full blocks of at most 8 kB) | matches hdf5plugin, u8-u64, 8k-256k blocks, tails, corrupt input -> error, fused == unfused; L40S and TITAN Black. Phases 1-3 of `docs/plan_lz4_slang.md` done; plane-aware match copy (runs as fills, plane repeats without a modulo; pac's idea, 3a94af2). L40S, 16 frames/call, device us/frame: silicon 20.4 vs reference 19.6, CeO2 53 vs 67; wall faster than the reference on both (silicon 0.54 ms per 16-frame call, 263 GB/s). `SLABITZ_LZ4_FUSED=0` forces the unfused path |
+| `sbz_dctx_bslz4_decompress` (bitshuffle-LZ4 chunks, `kernels/Lz4DecodeBlocks.slang`, fused `kernels/Lz4DecodeUnshuffle.slang` for full blocks of at most 8 kB) | matches hdf5plugin, u8-u64, 8k-256k blocks, tails, corrupt input -> error, fused == unfused; L40S and TITAN Black. Phases 1-3 of `docs/archive/plan_lz4_slang.md` done; plane-aware match copy (runs as fills, plane repeats without a modulo; pac's idea, 3a94af2). L40S, 16 frames/call, device us/frame: silicon 20.4 vs reference 19.6, CeO2 53 vs 67; wall faster than the reference on both (silicon 0.54 ms per 16-frame call, 263 GB/s). `SLABITZ_LZ4_FUSED=0` forces the unfused path |
 | Real pac files (silicon u16, CeO2 u32), 16 frames/call | L40S 41 / 6.5 GB/s; TITAN Black 10 / 2.7 GB/s (`bench/old_cards.py`) |
 | Volta+ (sm_70 and newer) | works (tested on sm_89) |
 | Pre-Volta (sm_35 to sm_61) | works on the sm_35 TITAN Black (check_bshuf 17/17, all per-stage and chain tests) and on the sm_61 GTX 1050 Ti (all 11 test scripts + 12-case matrix in `bench/pac_matrix.py` with local cubins; `build/kernels` fatbins not yet rebuilt/spot-checked after `pac-zstd` kernel edits); sm_50 not yet run |
 | Portable kernels (`pixi run -e kepler build-sm35 && pixi run build-fatbins` -> `build/kernels/`) | one fatbin per kernel: sm_35 (NVRTC 11.8), sm_50..sm_90 (nvcc 12.6), compute_90 PTX; 22 files, 5.1 MB. `tests/run_suite_kernel_dir.sh build/kernels` passes on the L40S (same speed as local cubins) and on the TITAN Black under driver 340 |
 | Other Slang targets (compile only, slangc 2026.22) | Last survey at 21 kernels: SPIR-V and HLSL 19/19; Metal 13/19: `WavePrefixCountBits` has no Metal lowering (4 DS kernels: PrefixSum, ComputePrefixSum, ParseCompressedBlocks, InitFseTable) and Metal lacks `GetDimensions` (both unshuffle kernels; pass byte counts as scalars instead). The 2 LZ4 kernels (`Lz4DecodeBlocks`, `Lz4DecodeUnshuffle`) build for SPIR-V and Metal. `BshufWalkChunks` was added later: re-run the survey. `ExecuteSequences` and `InitHuffmanTableAndDecompressLiterals` re-checked for SPIR-V and Metal after tuning |
-| pac-written zstd (local clone of pac-zstd) | done on branch `pac-zstd` (`docs/plan_pac_zstd.md`): verified byte-exact across the 12-case matrix (`bench/pac_matrix.py`: silicon/thaumatin/CeO2 x u16/u32 x mask=0/max-1, 648.9 MB compared) and real zstd files (`tests/run_bshuf_chain.py`). `ExecuteSequences` uses generic `uint4` fills (`off=1`), `uint4`/`uint32` aligned copies (`off=P`), fused short `off=1` fills, and `uint32` literal copies (`maskmax-1` `ExecuteSequences` 3.73x faster on `silicon_u32`); `InitHuffmanTableAndDecompressLiterals` overlaps `GS_PreInit`/`GS_HuffmanTable` (1614 -> 1292 dwords) and uses 1-search table expansion (`Literals` -21% to -24%) |
+| pac-written zstd (local clone of pac-zstd) | done on branch `pac-zstd` (`docs/archive/plan_pac_zstd.md`): verified byte-exact across the 12-case matrix (`bench/pac_matrix.py`: silicon/thaumatin/CeO2 x u16/u32 x mask=0/max-1, 648.9 MB compared) and real zstd files (`tests/run_bshuf_chain.py`). `ExecuteSequences` uses generic `uint4` fills (`off=1`), `uint4`/`uint32` aligned copies (`off=P`), fused short `off=1` fills, and `uint32` literal copies (`maskmax-1` `ExecuteSequences` 3.73x faster on `silicon_u32`); `InitHuffmanTableAndDecompressLiterals` overlaps `GS_PreInit`/`GS_HuffmanTable` (1614 -> 1292 dwords) and uses 1-search table expansion (`Literals` -21% to -24%) |
 | `src/host_walk.c` on corrupt input | bounds-checked: any input -> `SBZ_OK` / `SBZ_ERR_CORRUPT` / `SBZ_ERR_LIMIT` (15 named corrupt cases; ASan/UBSan fuzz, `make build/fuzz_host_walk`, 200k mutants in the test). Compressed-block contents are still trusted by the GPU kernels |
 | Python wrapper, packaging, pytest suite | not started (tests are standalone scripts; a ctypes loader is in `slabitz/`) |
+| P4 streaming API | async LZ4 + zstd calls, device-input LZ4 (`sbz_dctx_*_async`, `_device`, `sbz_dctx_wait`); zstd device input, public header, per-chunk status: T12, T13 |
+| zstd version coverage | corpus from libzstd 1.5.7 only; target bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0: T06, T07, T09, T10 |
+| Per-kernel Python scripts | 6 of 24 pass outdated argument lists (found 2026-11-25; none is in `pixi run test`): T01 |
+| Performance regression gate | none: numbers live in prose, no stored baseline: T03 |
+| Compression | not started; LZ4 then zstd: T17-T19 |
 
 Output lives on the device (`UnCompressedFramesData` / `BshufOutput`);
 `sbz_dctx_read_buffer` copies a named buffer back (also the debug hook for
@@ -95,6 +100,18 @@ diffing one stage against `kernels/cpu_ref_*.py`).
   mask without a `*_sync` call needs the same treatment.
 - Worker (DeepSeek via opencode) output is re-verified before commit; say in
   the commit message when a change was worker-drafted.
+- Work goes by task files in `docs/dev/` (see its README): one branch per
+  task, a report `docs/dev/reports/TNN.md` with every acceptance command and
+  its numbers, and the reviewer reruns the acceptance and reviewer checks
+  before a merge. A check that did not run is "not run", never "pass".
+- Every Python script that launches a kernel directly checks its argument
+  list with `tests/kparams.py` `check_args` (from T01); run `pixi run
+  test-kernels` after any kernel signature change. A short `cuLaunchKernel`
+  list is not an error at launch: the kernel reads garbage (2026-11-25: six
+  scripts were behind for weeks).
+- Performance claims come from `bench/gate.py --compare` over the whole
+  matrix (from T03), never from the one case a change targets; "unchanged"
+  means within the gate thresholds in every cell.
 - Kernel fusion only when all three hold: (1) one workgroup produces exactly
   the tile the consumer needs; (2) the tile fits in groupshared on every
   target, at most 16 KB per group (Vulkan minimum); (3) the intermediate's
@@ -134,122 +151,32 @@ dumps the parse-stage buffers for diffing two GPUs. Kernels built by NVRTC
 11.8 that call `printf` do not load under driver 340; debug by writing values
 to an output buffer.
 
-## Next steps (in order)
+## Plan and next steps
 
-1. **Old cards: spot-check** sm_50 (960M) and sm_61 (1050 Ti) with the
-   portable fatbins: rebuild `build/sm_35` (`pixi run -e kepler build-sm35`) and
-   `build/kernels` (`pixi run build-fatbins`) after the `pac-zstd` kernel edits,
-   then run `tests/run_suite_kernel_dir.sh build/kernels` on each. (sm_61 local
-   cubins already pass all 11 test scripts and `bench/pac_matrix.py`.) sm_35 is
-   the floor: Fermi (sm_20, crunch's Quadro 600) is not supported (no warp
-   shuffles, no toolkit after CUDA 8); the library fails there cleanly with
-   `SBZ_ERR_KERNEL` ("no kernel image").
-2. **P4 streaming API, Python wrapper, wheel**: `docs/plan_p4_api.md`
-   (five steps; decisions settled with the user 2026-11-20: caller-owned
-   device memory, ctypes over bslz4_to_sparse's `_backend_drv.py`, a wheel
-   with the fatbins, no HDF5 helper yet). Step 1 (audit of the mid-call
-   readbacks, overlap measurement) is done and waits for the user's review:
-   `docs/p4_readback_audit.md`. Two threads sharing one CUDA context already
-   overlap up to x1.8 today; separate contexts do not. Step 2a (LZ4) done,
-   912d07e: `sbz_dctx_bslz4_decompress_async` + `sbz_dctx_wait`, one thread
-   alternating two contexts: silicon LZ4 0.38 ms per 16-frame call (GPU-bound),
-   CeO2 about 3.3 ms against a 2.35 ms upload. `SLABITZ_TRACE=1` (device
-   timeline from CUDA events, no syncs; `bench/p4_trace_lz4.py`) showed why:
-   the input upload now goes before the host walk (it was queued after it,
-   leaving the GPU idle 1.45 ms per call), and the two contexts' uploads
-   share PCIe at the same time, so their kernels also coincide while PCIe is
-   idle. Back-to-back uploads need one upload stream plus events (P4 step 3:
-   the caller's uploads). Review decisions (2026-11-20, in the plan): scratch of
-   the order of the output is fine (Eiger2 16M u16, ~35 MB per frame, cards
-   from 1 GB), errors are rare enough for a slow error path, a full-GPU
-   option (chunk walk on the device) is wanted later (step 2c). Step 2b
-   (zstd) done, 806b260: no readback after capacities are learned, capacities for the
-   literal/sequence buffers, one check at `sbz_dctx_wait` with an exact
-   replay on overflow or error; primary CUDA context. Zero-copy zstd input
-   (2026-11-20): walked and uploaded in place, pinned input makes the zstd
-   call async too (CeO2 serial 9.42 -> 7.62 ms). Step 2c for LZ4 done
-   (1ecfae2): `sbz_dctx_bslz4_decompress_device` takes device-resident chunks
-   and a stated geometry; a kernel walks the block records (latency-bound:
-   ~0.4 / 1.3 ms per call, overlapped with the other context); CeO2 1.31 ms
-   per call with resident input. Next: 2c for zstd (frame refs from the same
-   walk; block-type counts need capacities and guards in the frame-parsing
-   kernels), then step 3 (public header). Steps 1-2 are subtle C runtime
-   work, not for the DeepSeek worker.
-   Design for streaming (the intended use): frames arrive as a stream, the
-   upload of batch n+1 overlaps the decode of batch n, decoded frames stay on
-   the GPU and are reduced there, and only results smaller than the
-   compressed input come back. Throughput is then max(upload, device time)
-   per frame, so a call must not block the host: pinned (or caller-owned
-   device) input, no mid-call readback except exact mode (the first call, a
-   replay and `SLABITZ_CHECK_SYNC=1` still read counters; the LZ4 status is
-   read at `sbz_dctx_wait`), per-frame
-   status left on the device for the caller to read later, and buffers
-   reused across calls (double-buffered for overlap).
-   Packaging: the 22 per-kernel fatbins are intentional (one CUDA module per
-   kernel); if a single distribution file is wanted later, add a host-side
-   bundle loaded by slice, never a merged module.
-3. **Pac ideas for zstd (decode side) -- done** (branch `pac-zstd`, `docs/plan_pac_zstd.md`):
-   - Investigation across the 12-case matrix (`silicon`, `thaumatin`, `CeO2` x
-     `u16`/`u32` x `mask=0`/`mask=max-1`, `bench/pac_matrix.py`) showed
-     `seq.offs == P` in DS's `< 32` swizzle loop does not apply (`P >= 256` B,
-     zero overlapping `P` matches), while `mask=max-1` exposed a 5.0x
-     `ExecuteSequences` slowdown from byte-at-a-time loads/stores on 48-95%
-     non-overlapping `off == P` matches.
-   - Implemented generic standard-zstd tuning (no `planeSize` arg):
-     vectorized `uint4`/`uint32` `zstdgpu_MatchCopy`, fused short `off=1` in
-     `ExecuteSequence_FusedCopy`, `uint32` `zstdgpu_MemCpy_DstSrc`, and
-     `InitHuffmanTableAndDecompressLiterals` LDS overlap (1614 -> 1292 dwords) +
-     1-search table expansion.
-   - GTX 1050 Ti (248 kB, 4 frames/call): `silicon_u32_maskmax-1`
-     `ExecuteSequences` 3.73x faster (wall 2.32 -> 1.24 ms/fr); `Literals`
-     -21% to -24% on `CeO2` and `thaumatin`; stock `silicon`/`thaumatin`
-     unchanged and stock `CeO2` 6-13% faster. Committed `tests/run_bshuf_chain.py`
-     real-file zstd checks (`SLABITZ_EXAMPLES`).
-4. **Slang CPU target survey (compile only)**: Slang's CPU target is
-   experimental (C++ kernel/host, exe/lib) and compute-only. Compile the 22
-   entries for it with the pinned slangc, record which wave/`groupshared`/
-   barrier intrinsics fail (the Metal survey is the template), and decide
-   whether a CPU fallback is worth a host backend. No runtime work yet.
-5. **P5 tests**: `docs/plan_p5_tests.md` (pytest entry point, feature
-   matrix with oracle-proved coverage, random round trips, corrupt
-   compressed blocks on the GPU, compute-sanitizer). Independent of P4;
-   suits the worker; P4 step 1 is done, so it can start any time.
-6. **P6 performance** (`SLABITZ_PROFILE=1` prints a per-kernel table): the
-   remaining cost is DecompressSequences (one thread per compressed block) and
-   ExecuteSequences (one workgroup per frame): a latency floor per call (1
-   silicon frame: 1.55 ms wall, of which ExecuteSequences 1.0 ms and
-   DecompressSequencesMultiStream 0.29 ms are device time). "CeO2 gets slower
-   per frame from 4 to 16 frames/call" was measured with harnesses that join
-   the chunks inside the timed loop (45 ms of a 16-frame CeO2 call); re-check
-   with the input built once. RAW/RLE
-   block-size prefixes are now unused by MemsetMemcpy (still checked by
-   run_chain_stage01). Then: time each stage on batches, compare the full chain
-   with nvCOMP; overlap uploads with decode; reuse buffers across calls. Large
-   frames (one workgroup per frame) are slow but not an issue at pac's 248 kB.
-   Measured 2026-11-20 (L40S, 16 frames/call, device us per frame): silicon
-   zstd ExecuteSequences 87, DecompressSequencesMultiStream 18, unshuffle 34,
-   ~13 small kernels ~15 (synced); CeO2 upload 193 (PCIe-bound, 21 GB/s),
-   ExecuteSequences 112, literals 71, sequences 45, unshuffle 63.
-   - Fusing the unshuffle into ExecuteSequences fails the fusion rule (one
-     workgroup per frame, 256 kB blocks) and would run the unshuffle on 16
-     SMs instead of the whole GPU. Revisit only after ExecuteSequences has
-     more parallelism.
-   - With overlapped uploads (P4 streaming) LZ4 is PCIe-bound on CeO2 (upload
-     183 vs device 59 us/frame) and device-bound on silicon (11 vs 25); zstd
-     is device-bound on both. ExecuteSequences parallelism is the main lever.
-   - CUDA graphs: low priority. Phase 3 step 4 found the per-call fixed cost
-     is device time (above), not launches: graphs would save at most ~0.2 ms
-     per zstd call and less for LZ4. The async path already defers the readback to the wait (P4 2b);
-     exact mode still reads counters mid-call. If graphs are tried later, the
-     preconditions are: finish removing the exact-mode mid-chain
-     `read_counters()` readback (`src/sbz_chain.c`, after stage 0) with the
-     indirect-dispatch pattern DS was written for (worst-case buffer sizes
-     bounded by the input, kernels read their counts from the device and exit
-     early; Vulkan's `vkCmdDispatchIndirect` and command buffers are the same
-     design); stable buffer addresses (rebuild the graph when a buffer
-     grows); graph calls optional via dlopen (driver 410+), plain launches on
-     Kepler's driver 340. Capture with stream capture around the existing
-     launch code.
+The single actionable plan is `docs/dev/README.md`: an ordered task list
+(T01-T22, one file per task, each with measurable acceptance checks and
+reviewer checks), plus how to execute and how to verify a task. Start there.
+Finished and folded plans are in `docs/archive/` (history, not instructions).
 
-Out of scope for v1: dictionaries, GPU checksum verification (checksums are
-skipped), compression. Vulkan backend later (behind `src/sbz_backend.h`).
+Intended use, which every API and performance decision serves: frames arrive
+as a stream, the upload of batch n+1 overlaps the decode of batch n, decoded
+frames stay on the GPU and are reduced there (e.g. bslz4_to_sparse's sparse
+and integrate kernels), and only results smaller than the compressed input
+come back. Throughput is then max(upload, device time) per frame, so a call
+must not block the host: caller-owned device (or pinned) input, no mid-call
+readback except exact mode, per-chunk status left on the device, buffers
+reused across calls.
+
+Known limits (2026-11-25 audit; tasks that change them in brackets): frames
+without Frame_Content_Size are rejected [T09 code, T10 support]; windows
+>= 2^29 are rejected by the GPU parser only [T09: clean host reject, kept
+as a limit]; host and GPU rejects differ and surface as "block counts GPU !=
+host" [T09]; decoded size is not checked against FCS, so a lying frame can
+overwrite its neighbour [T09]; output per call is capped at 1 GiB by the DS
+request limit [T09]; compressed-block contents are trusted by the kernels
+[T11]; the test corpus comes from libzstd 1.5.7 only [T06, T07].
+
+Out of scope for v1: dictionaries (rejected), GPU checksum verification
+(checksums are skipped). Compression is planned (T17-T19: LZ4 first, then
+zstd, the subset pac-zstd emits). Vulkan backend later (behind
+`src/sbz_backend.h`).

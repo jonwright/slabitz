@@ -1,5 +1,9 @@
 # Plan: P5, test suite
 
+> Archived 2026-11-25. Folded into the task files in `docs/dev/` (P4: T12-T16;
+> P5: T02, T06, T11). Kept for its history and settled decisions; the task
+> files are the instructions.
+
 The P5 tests item in `AGENTS.md`. Today the tests are standalone scripts run by
 `pixi run test` / `build_test.sh`. They check real data and hand-picked
 cases well, but nothing proves that every zstd feature the decoder must
