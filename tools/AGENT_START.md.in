@@ -46,7 +46,9 @@ sbz where                  paths in use
   `shared/`, `ext/`, `toolchains/` or `kernels/` by hand.
 - Do not search the filesystem for test data: use `$SLABITZ_EXAMPLES` (`data/real`) and
   `$SLABITZ_SYNTH`. `data/real/INVENTORY.md` says what each file is.
-- Never read or write outside this folder, not even `/tmp` (use `$TMPDIR`).
+- Never read or write outside this folder, not even `/tmp` (use `$TMPDIR`). Workers started by
+  opencode with this folder as working directory must use RELATIVE paths (`wt/<task>/...`): an
+  absolute path to the same folder is treated as outside it and auto-rejected.
 - If a package or tool is missing: write the need to `QUESTIONS.txt` in your worktree,
   finish what does not depend on it, and stop. The reviewer changes the shared environment.
 - Never push. The user does all pushes.
