@@ -74,9 +74,10 @@ pixi_env() {
 write_hook() {  # write_hook <env name> <out file>
     ( pixi_env; cd "$ROOT/env"; pixi shell-hook -e "$1" ) | python3 -c '
 import re, sys
-root = sys.argv[1]
+root, logical = sys.argv[1], sys.argv[2]
 out, skip = [], False
-for line in sys.stdin.read().split("\n"):
+# pixi writes canonical paths (/gpfs/gd/data/...); crunch only sees the logical ones (/data/...)
+for line in sys.stdin.read().replace(root, logical).replace("/gpfs/gd/", "/").split("\n"):
     if skip:
         if line == "}":
             skip = False
@@ -87,11 +88,20 @@ for line in sys.stdin.read().split("\n"):
     if line.startswith("export PIXI_") or "PIXI_EXE" in line:
         continue
     if line.startswith("export PATH="):
-        keep = [x for x in line[len("export PATH="):].strip().strip(chr(34)).split(":") if x.startswith(root)]
+        keep = [x for x in line[len("export PATH="):].strip().strip(chr(34)).split(":") if x.startswith(logical)]
         line = "export PATH=\"%s:$PATH\"" % ":".join(keep)
     out.append(line)
 print("\n".join(out))
-' "$(readlink -f "$ROOT/env")" > "$2"
+' "$(readlink -f "$ROOT/env")" "$ROOT/env" > "$2"
+}
+
+# crunch does not see /gpfs/gd, only /data: strip it from the shebangs of the env's scripts
+fix_shebangs() {
+    local f
+    for f in "$ROOT"/env/.pixi/envs/*/bin/*; do
+        [ -f "$f" ] && [ ! -L "$f" ] || continue
+        if [ "$(head -c 11 "$f" 2>/dev/null)" = "#!/gpfs/gd/" ]; then sed -i '1s|^#!/gpfs/gd/|#!/|' "$f"; fi
+    done
 }
 
 in_env() {  # run a command with the shared environment, from directory $1
@@ -162,6 +172,7 @@ init_env() {
       true )
     write_hook default "$ROOT/env/activate.sh"
     write_hook kepler "$ROOT/env/activate-kepler.sh"
+    fix_shebangs
 }
 
 init_slang() {
@@ -334,6 +345,7 @@ cmd_update_env() {
       pixi install --locked -e kepler )
     write_hook default "$ROOT/env/activate.sh"
     write_hook kepler "$ROOT/env/activate-kepler.sh"
+    fix_shebangs
 }
 
 cmd_new() {

@@ -22,6 +22,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="${REPO#/gpfs/gd}"   # crunch sees /data, not /gpfs/gd
 cd "$REPO"
 
 ROOT="${SLABITZ_DEV_ROOT:-}"
