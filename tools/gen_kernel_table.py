@@ -15,7 +15,6 @@ Usage: tools/gen_kernel_table.py [--build build] [--out src/sbz_kernels_gen.h]
        (tools/build_all.py calls this after compiling every kernel)
 """
 import argparse
-import hashlib
 import json
 import pathlib
 import sys
@@ -24,30 +23,18 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 from build_all import KERNEL_MAP  # noqa: E402
+from kernel_sources import ID_SOURCES, hash_files  # noqa: E402  (the one list of sources)
 
-# Everything that shapes the compiled kernels. Their content (not mtimes or
-# absolute paths, so the ID is the same in every clone) goes into
-# SBZ_KERNELS_ID, together with the launch table itself. The library refuses a
-# kernel directory whose sbz_kernels.id differs: a stale kernel set otherwise
-# loads silently, and a changed argument list crashes the launch.
-ID_SOURCES = ["kernels/*.slang", "kernels/lib/*", "third_party/directstorage_zstdgpu/**/*",
-              "tools/transform_ds_for_slang.py", "tools/slang_compat.h",
-              "tools/slang_cuda_prevolta.h", "tools/fetch_slangc.sh"]
 ID_FILE = "sbz_kernels.id"
 
 
 def kernels_id(table_text):
     """16 hex digits: SHA-256 over the ID_SOURCES files (sorted relative
     paths and contents) and the generated launch table."""
-    h = hashlib.sha256()
-    files = sorted({p for pat in ID_SOURCES for p in ROOT.glob(pat) if p.is_file()})
-    if not files:
-        raise SystemExit("gen_kernel_table: no kernel sources found under %s" % ROOT)
-    for p in files:
-        h.update(str(p.relative_to(ROOT)).encode() + b"\0")
-        h.update(p.read_bytes() + b"\0")
+    h = hash_files(ID_SOURCES)
     h.update(table_text.encode())
     return h.hexdigest()[:16]
+
 
 SCALAR_SIZE = {"uint8": 1, "int8": 1, "uint16": 2, "int16": 2, "uint32": 4, "int32": 4,
                "float32": 4, "uint64": 8, "int64": 8, "float64": 8}

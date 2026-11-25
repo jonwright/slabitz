@@ -31,29 +31,23 @@ curl = "*"
 cuda-version = "12.6.*"
 cuda-nvcc = "*"
 cuda-nvrtc = "*"
+# test and tool dependencies of the planned tasks (T02 pytest, T18 lz4)
+pytest = "*"
+lz4 = "*"
 
 [tasks]
+# One definition of each task: tools/sbz.sh (also what agents run as `sbz`).
 fetch-slangc = "bash tools/fetch_slangc.sh"
 build-kernels = { cmd = "python3 tools/build_all.py", depends-on = ["fetch-slangc"] }
 build-lib = "make"
-build = { depends-on = ["build-kernels", "build-lib"] }
+build = "bash tools/sbz.sh build"
 # One fatbin per kernel covering sm_35..sm_90 + compute_90 PTX (tools/build_fatbins.py).
 # Needs the kernels built (`pixi run build`) and the sm_35 cubins (`pixi run -e kepler
 # build-sm35`); the result is the per-card directory to point SLABITZ_KERNEL_DIR at.
-build-fatbins = { cmd = "python3 tools/build_fatbins.py", depends-on = ["build-kernels"] }
-test = { cmd = """
-python3 tests/run_kernel_id.py &&
-python3 tests/run_host_walk.py &&
-python3 tests/run_chain_stage01.py &&
-python3 tests/run_chain_stage2.py &&
-python3 tests/run_chain_frames.py &&
-python3 tests/run_bshuf_chain.py &&
-python3 tests/run_bslz4_chain.py &&
-python3 tests/run_zstd_async.py &&
-python3 tests/run_bslz4_device.py &&
-python3 tests/run_unshuffle_slow.py &&
-python3 tests/run_unshuffle_warp.py
-""", depends-on = ["build"] }
+build-fatbins = "bash tools/sbz.sh build-fatbins"
+test = "bash tools/sbz.sh test"
+test-kernels = "bash tools/sbz.sh test-kernels"
+pytest = "bash tools/sbz.sh pytest"
 
 # Kepler (sm_35) kernels: CUDA 12 dropped sm_35, so they are compiled with
 # NVRTC from CUDA 11.8 (no host compiler needed). Separate environment because
@@ -65,7 +59,7 @@ python = "3.12.*"
 cudatoolkit = "11.8.*"
 
 [feature.kepler.tasks]
-build-sm35 = "python3 tools/build_kubins.py --arch sm_35 --out build/sm_35 --nvrtc $CONDA_PREFIX/lib/libnvrtc.so"
+build-sm35 = "bash tools/sbz.sh build-sm35"
 
 [environments]
 kepler = { features = ["kepler"], no-default-feature = true }
