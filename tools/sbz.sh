@@ -58,7 +58,8 @@ EOF
 header_id() { sed -n 's/^#define SBZ_KERNELS_ID "\(.*\)"/\1/p' "$REPO/src/sbz_kernels_gen.h"; }
 
 in_cache() {  # is path $1 (resolved) inside the shared kernel cache?
-    [ "$ROOT_MODE" = 1 ] && case "$(readlink -f "$1" 2>/dev/null || echo "$1")" in "$ROOT"/kernels/*) return 0 ;; esac
+    [ "$ROOT_MODE" = 1 ] || return 1
+    case "$(readlink -f "$1" 2>/dev/null || echo "$1")" in "$(readlink -f "$ROOT")"/kernels/*) return 0 ;; esac
     return 1
 }
 
