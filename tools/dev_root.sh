@@ -24,7 +24,7 @@ set -euo pipefail
 
 ROOT="${SLABITZ_DEV_ROOT:?set SLABITZ_DEV_ROOT (e.g. in ~/.bashrc)}"
 GITHUB_URL="https://github.com/jonwright/slabitz.git"
-MAIN_REF="${DEV_ROOT_MAIN_REF:-origin/main}"
+MAIN_REF="${DEV_ROOT_MAIN_REF:-$(cat "$ROOT/.main-ref" 2>/dev/null || echo origin/main)}"
 OLD_WS="${DEV_ROOT_OLD_WS:-}"
 EXT_SRC="${DEV_ROOT_EXT_SRC:-}"
 FROM="${DEV_ROOT_FROM:-$GITHUB_URL}"
@@ -67,6 +67,31 @@ pixi_env() {
            RATTLER_CACHE_DIR="$ROOT/admin/pixi/cache" TMPDIR="$ROOT/tmp/admin"
     mkdir -p "$TMPDIR"
     export PATH="$ROOT/admin/pixi/bin:$PATH"
+}
+
+# A hook for the shared env: only the env's own PATH entries (never the generating user's
+# PATH, never pixi), no PIXI_* variables and no pixi() function.
+write_hook() {  # write_hook <env name> <out file>
+    ( pixi_env; cd "$ROOT/env"; pixi shell-hook -e "$1" ) | python3 -c '
+import re, sys
+root = sys.argv[1]
+out, skip = [], False
+for line in sys.stdin.read().split("\n"):
+    if skip:
+        if line == "}":
+            skip = False
+        continue
+    if line.startswith("pixi()") or line.startswith("pixi ()"):
+        skip = True
+        continue
+    if line.startswith("export PIXI_") or "PIXI_EXE" in line:
+        continue
+    if line.startswith("export PATH="):
+        keep = [x for x in line[len("export PATH="):].strip().strip(chr(34)).split(":") if x.startswith(root)]
+        line = "export PATH=\"%s:$PATH\"" % ":".join(keep)
+    out.append(line)
+print("\n".join(out))
+' "$(readlink -f "$ROOT/env")" > "$2"
 }
 
 in_env() {  # run a command with the shared environment, from directory $1
@@ -134,9 +159,9 @@ init_env() {
     ( pixi_env; cd "$ROOT/env"
       pixi install --locked
       pixi install --locked -e kepler
-      pixi shell-hook -e default > "$ROOT/env/activate.sh"
-      pixi shell-hook -e kepler > "$ROOT/env/activate-kepler.sh" )
-    grep -q "pixi " "$ROOT/env/activate.sh" && echo "note: activate.sh mentions pixi (check it is not a call)" || true
+      true )
+    write_hook default "$ROOT/env/activate.sh"
+    write_hook kepler "$ROOT/env/activate-kepler.sh"
 }
 
 init_slang() {
@@ -279,6 +304,7 @@ cmd_init() {
         esac
     done
     init_layout
+    echo "$MAIN_REF" > "$ROOT/.main-ref"
     init_pixi
     init_repo
     init_env
@@ -305,9 +331,9 @@ cmd_update_env() {
     git -C "$ROOT/env" checkout --quiet --detach "$MAIN_REF"
     ( pixi_env; cd "$ROOT/env"
       pixi install --locked
-      pixi install --locked -e kepler
-      pixi shell-hook -e default > activate.sh
-      pixi shell-hook -e kepler > activate-kepler.sh )
+      pixi install --locked -e kepler )
+    write_hook default "$ROOT/env/activate.sh"
+    write_hook kepler "$ROOT/env/activate-kepler.sh"
 }
 
 cmd_new() {
