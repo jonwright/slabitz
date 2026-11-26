@@ -116,7 +116,9 @@ def real_and_twin(key, root, perturb=False):
     fr, _ = fit_mod.read_frames(K.real_path(key), K.KEYS[key]["ds"], params["frames_used"])
     if perturb:
         # reviewer check: twice the pattern density (every expected count and the hot pixels)
-        p2 = dict(params, hot_per_frame=2 * params["hot_per_frame"])
+        p2 = dict(params, hot_per_frame=2 * params["hot_per_frame"],
+                  hot_counts=[2 * c for c in params.get("hot_counts", [])],
+                  hot_natural=2 * params.get("hot_natural", 0.0))
         tw = twin.frames(p2, arrays, len(fr), SEED, lam_scale=2.0)
     else:
         tw = np.load(os.path.join(root, "twins", key, "raw.npy"), mmap_mode="r")[:len(fr)]
@@ -161,8 +163,13 @@ def compare_key(key, root, enc=None, quick=False, perturb=False):
             continue
         rep.check("P4 ratio %s" % name, b["ratio"], a["ratio"], rel=TOL_P4_RATIO)
         if "seq" in a:
-            for f in ("literal", "off1", "offP"):
-                rep.check("P4 %s frac %s" % (f, name), b["seq"][f], a["seq"][f], abs_=TOL_P4_FRAC)
+            sa, sb = a["seq"], b["seq"]
+            for f in ("rle_raw", "literal", "zero", "fill", "short", "long"):
+                rep.check("P4 %s frac %s" % (f, name), sb[f], sa[f], abs_=TOL_P4_FRAC)
+            print("  (%d blocks; not checks: zero copies by offset fill/short/long twin %.3f/%.3f/%.3f "
+                  "real %.3f/%.3f/%.3f; off=P part of long twin %.3f real %.3f; sequences/kB twin %.2f real %.2f)"
+                  % (sa["blocks"], sb["zero_fill"], sb["zero_short"], sb["zero_long"], sa["zero_fill"],
+                     sa["zero_short"], sa["zero_long"], sb["offP"], sa["offP"], sb["seq_per_kb"], sa["seq_per_kb"]))
             print("  P4 block mix %s: twin %s real %s" % (name, b["block_mix"], a["block_mix"]))
     return rep
 

@@ -7,8 +7,10 @@
   * ``lam``: block means of the frames, clipped at the 99.99th percentile of
     live values, on blocks big enough to hold a few hundred counts;
   * ``scales``: the clipped live mean of each frame over the mean of all;
+  * ``frame_ratio``: per frame, its block sums over the map's expectation on
+    32-pixel blocks (brightness and pattern changes during a scan);
   * ``hot``: the live values above the clip, kept as an empirical sample, and
-    their count per frame;
+    their count in each frame (``hot_counts``);
   * ``k``: the gamma shape that makes the twin's value histogram closest to the
     real one (Jensen-Shannon distance), or none for plain Poisson.
 
@@ -26,6 +28,8 @@ from . import metrics, twin
 
 NFRAMES = 12
 K_CANDIDATES = [None, 60.0, 20.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25]
+BF = 32               # block size of the per-frame ratio maps
+RATIO_PSEUDO = 50.0   # counts: a block with fewer expected counts leans to the frame's mean factor
 
 
 def frame_indices(n, nfit=NFRAMES):
@@ -166,6 +170,7 @@ def fit(key, params_dir=K.PARAMS_DIR, nfit=NFRAMES, log=print):
     lam = _adaptive_smooth(lam, num, den)
     lam = _fill(lam, valid).astype(np.float32)
     scales = np.array(nmean) / np.mean(nmean)
+    hot_raw = hot
     hot = np.concatenate(hot).astype(np.int64)
     if hot.size > 20000:
         hot = np.sort(rng.choice(hot, 20000, replace=False))
@@ -178,6 +183,19 @@ def fit(key, params_dir=K.PARAMS_DIR, nfit=NFRAMES, log=print):
         "live_mean_clipped": lam_mean,
     }
     arrays = {"lam": lam, "mask_idx": mask_idx, "hot_values": hot}
+    # each frame's pattern: its block sums over what the map expects there, on
+    # BF-pixel blocks (pseudo-counts pull dim blocks to the frame's brightness
+    # factor).  Scans move the pattern between frames (kevlar), which one
+    # averaged map cannot hold.
+    base_fit = twin.upsample(lam, B, shape)
+    ratio = []
+    for f, s in zip(fr, scales):
+        ok = live & (f <= clip)
+        n_ = block_sum(np.where(ok, np.maximum(f, 0), 0).astype(np.float64), BF)
+        g_ = block_sum(np.where(ok, base_fit, 0.0), BF)
+        ratio.append((n_ + RATIO_PSEUDO * s) / (g_ + RATIO_PSEUDO))
+    arrays["frame_ratio"] = np.array(ratio, dtype=np.float16)
+    params["Bf"] = BF
     # gamma shape per range of expected count: the twin whose value histogram of
     # the clipped live values is closest to the real one in that range
     edges = [0.0, 0.05, 0.5, 2.0, 8.0, 30.0, 100.0, 300.0, 1000.0, 1e12]
@@ -226,6 +244,9 @@ def fit(key, params_dir=K.PARAMS_DIR, nfit=NFRAMES, log=print):
     arrays["hot_map"] = hmap.astype(np.float32)
     params["hot_natural"] = natural
     params["hot_per_frame"] = max(0.0, nhot / len(fr) - natural)
+    # real frames differ a lot in how many hot pixels they hold (a rotating
+    # crystal lights up peaks in some frames only): keep each frame's count
+    params["hot_counts"] = [int(h.size) for h in hot_raw]
     for j, (_, _, n) in enumerate(real_bins):
         log("  lam %-8g..%-8g px %-9d k=%s (JSD %.4f)" % (edges[j], edges[j + 1], n, params["k_vals"][j], best[j][0]))
     log("  B=%d clip=%.0f hot/frame real %.1f natural %.1f added %.1f" % (
@@ -235,5 +256,6 @@ def fit(key, params_dir=K.PARAMS_DIR, nfit=NFRAMES, log=print):
         json.dump(params, fh, indent=1, sort_keys=True)
         fh.write("\n")
     np.savez_compressed(os.path.join(params_dir, key + ".npz"),
-                        lam=lam, mask_idx=mask_idx, hot_values=hot, hot_map=arrays["hot_map"])
+                        lam=lam, mask_idx=mask_idx, hot_values=hot, hot_map=arrays["hot_map"],
+                        frame_ratio=arrays["frame_ratio"])
     return params

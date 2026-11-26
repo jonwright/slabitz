@@ -101,36 +101,34 @@ def bitshuffle_planes(block):
     return np.packbits(bits.T, axis=1, bitorder="little")
 
 
-def p3(frames, block_bytes, max_blocks=64):
-    """Per-plane all-zero fraction, equal-to-previous-plane fraction and mean
-    byte entropy of the other planes, over up to max_blocks full blocks."""
+def spread(n, k):
+    """k indices spread evenly over range(n) (all of them when k >= n)."""
+    if k >= n:
+        return np.arange(n)
+    return np.unique(np.linspace(0, n - 1, k).round().astype(np.int64))
+
+
+def p3(frames, block_bytes, max_blocks=2048):
+    """Per-plane all-zero fraction and equal-to-previous-plane fraction over
+    the full blocks of all frames (at most max_blocks, spread evenly over
+    frames and positions: a fixed stride per frame would visit the same
+    detector region in every frame)."""
     fr0 = np.asarray(frames[0])
     es = fr0.dtype.itemsize
     ne = block_bytes // es
-    zero, eq, ent = [], [], []
-    done = 0
-    for f in frames:
-        flat = np.ascontiguousarray(f).reshape(-1)
-        nb = flat.size // ne
-        step = max(1, nb // max(1, max_blocks // len(frames)))
-        for b in range(0, nb, step):
-            pl = bitshuffle_planes(flat[b * ne:(b + 1) * ne])
-            z = ~pl.any(axis=1)
-            zero.append(z.mean())
-            e = np.zeros(len(pl), dtype=bool)
-            e[1:] = (pl[1:] == pl[:-1]).all(axis=1) & ~z[1:]
-            eq.append(e.mean())
-            for p in pl[~z]:
-                c = np.bincount(p, minlength=256) / p.size
-                c = c[c > 0]
-                ent.append(float(-(c * np.log2(c)).sum()))
-            done += 1
-            if done >= max_blocks:
-                break
-        if done >= max_blocks:
-            break
-    return {"blocks": done, "zero_frac": float(np.mean(zero)), "eq_prev_frac": float(np.mean(eq)),
-            "entropy": float(np.mean(ent)) if ent else 0.0}
+    nb = fr0.size // ne
+    pick = spread(len(frames) * nb, max_blocks)
+    zero, eq = [], []
+    for g in pick:
+        f, b = divmod(int(g), nb)
+        flat = np.asarray(frames[f]).reshape(-1)
+        pl = bitshuffle_planes(flat[b * ne:(b + 1) * ne])
+        z = ~pl.any(axis=1)
+        zero.append(z.mean())
+        e = np.zeros(len(pl), dtype=bool)
+        e[1:] = (pl[1:] == pl[:-1]).all(axis=1) & ~z[1:]
+        eq.append(e.mean())
+    return {"blocks": len(pick), "zero_frac": float(np.mean(zero)), "eq_prev_frac": float(np.mean(eq))}
 
 
 # ------------------------------------------------------------------- P4
@@ -225,35 +223,69 @@ def chunk_blocks(chunk, elem_size):
     return total, bs, out
 
 
-def seq_fractions(frames_zst, plane_bytes, expect_len):
-    """Byte fractions from the educational-decoder dump of zstd frames: literal
-    bytes, matches at offset 1, at offset plane_bytes, other matches."""
+SHORT_OFF = 16      # matches with 1 < offset < 16 overlap a 16-byte copy (the decoder's uint4 path)
+
+
+def _off_class(o):
+    return "fill" if o == 1 else ("short" if o < SHORT_OFF else "long")
+
+
+def seq_fractions(frames_zst, plane_bytes):
+    """Byte classes of the compressed blocks of zstd frames, from the
+    educational-decoder dump, as fractions of the bytes those blocks decode to.
+
+    literal: literal bytes.  zero: match bytes that copy zero bytes only (the
+    all-zero runs of sparse bit planes); any earlier zero byte would serve as
+    the source, and libzstd picks the offset from its repeat-offset history,
+    so their offset split (zero_fill, zero_short, zero_long) is reported but
+    is not a property of the data.  fill, short, long: match bytes that copy
+    data, by the copy the decoder makes: offset 1, offset 2-15 (overlapping a
+    16-byte copy), 16 and more.  offP: data copies at one bit-plane distance
+    (part of long)."""
     from tools.edu_oracle import run_oracle
-    lit = m1 = mp = mo = 0
-    nseq = 0
-    for z, nbytes in zip(frames_zst, expect_len):
+    from . import zstdlib
+    acc = dict.fromkeys(("literal", "zero", "fill", "short", "long", "offP",
+                         "zero_fill", "zero_short", "zero_long"), 0)
+    nseq = comp = 0
+    for z in frames_zst:
         d = run_oracle(z)
-        seqs = [s for v in d.get("SEQ", []) for s in [v]]
-        offs = [v[0] for v in d.get("OFFS", [])]
-        ml = []
-        for v in seqs:
-            ml.extend(v[1::3])
-        ll = []
-        for v in seqs:
-            ll.extend(v[0::3])
-        nseq += len(ml)
-        mb = sum(ml)
-        for m, o in zip(ml, offs):
-            if o == 1:
-                m1 += m
-            elif o == plane_bytes:
-                mp += m
-            else:
-                mo += m
-        lit += nbytes - mb
-    tot = max(lit + m1 + mp + mo, 1)
-    return {"literal": lit / tot, "off1": m1 / tot, "offP": mp / tot, "other": mo / tot,
-            "sequences": nseq}
+        out = np.frombuffer(d["_output"], np.uint8)
+        seqs = iter(d.get("SEQ", []))
+        offs = iter(v[0] for v in d.get("OFFS", []))
+        pos = 0
+        for fr in zstdlib.analyse(z):
+            for b in fr.get("blocks", []):
+                if b["type"] in ("raw", "rle"):
+                    pos += b["size"]
+                    continue
+                n = b["lit_regen"]
+                acc["literal"] += n
+                if b["nseq"]:                     # the oracle prints no SEQ line for 0 sequences
+                    s = next(seqs)
+                    for ll, ml in zip(s[0::3], s[1::3]):
+                        o = next(offs)
+                        pos += ll
+                        cls = _off_class(o)
+                        if out[pos:pos + ml].any():
+                            acc[cls] += ml
+                            if o == plane_bytes:
+                                acc["offP"] += ml
+                        else:
+                            acc["zero"] += ml
+                            acc["zero_" + cls] += ml
+                        pos += ml
+                        n += ml
+                    nseq += b["nseq"]
+                    pos += b["lit_regen"] - sum(s[0::3])
+                else:
+                    pos += n
+                comp += n
+        if pos != len(out):
+            raise RuntimeError("oracle dump walk: %d bytes, decoded %d" % (pos, len(out)))
+    c = max(comp, 1)
+    res = {k: v / c for k, v in acc.items()}
+    res.update(seq_per_kb=1024.0 * nseq / c, blocks=len(frames_zst))
+    return res
 
 
 def zstd_block_mix_frame(z):
@@ -262,17 +294,39 @@ def zstd_block_mix_frame(z):
     return zstdlib.block_mix(z)
 
 
-def p4(frames, enc_name, pac_lib=None, nblocks=4):
+def p4(frames, enc_name, pac_lib=None, nblocks=128):
     """Ratio for the encoder; for the zstd encoders also the zstd block-type
-    mix and the byte-class fractions of the first nblocks blocks of frame 0."""
-    out = {"ratio": compression_ratio(frames, enc_name, pac_lib)}
+    mix (all blocks) and the byte classes of nblocks blocks spread evenly over
+    all frames and positions."""
     enc = ENCODERS[enc_name]
-    if enc[0] == "h5plugin" and enc[2] == "zstd":
-        ch = h5_chunks(np.ascontiguousarray(frames[:2]), enc_name)
-        total, bs, blocks = chunk_blocks(ch[0], frames.dtype.itemsize)
-        out["block_mix"] = _mix_over(blocks)
-        out["seq"] = seq_fractions(blocks[:nblocks], bs // (8 * frames.dtype.itemsize), [bs] * nblocks)
+    if not (enc[0] == "h5plugin" and enc[2] == "zstd"):
+        return {"ratio": compression_ratio(frames, enc_name, pac_lib)}
+    fr = np.ascontiguousarray(frames)
+    ch = h5_chunks(fr, enc_name)
+    out = {"ratio": fr.nbytes / sum(len(c) for c in ch)}
+    blocks = []
+    for c in ch:
+        _, bs, bl = chunk_blocks(c, fr.dtype.itemsize)
+        blocks.extend(bl)
+    out["block_mix"] = _mix_over(blocks)
+    pick = spread(len(blocks), nblocks)
+    out["seq"] = seq_fractions([blocks[i] for i in pick], bs // (8 * fr.dtype.itemsize))
+    out["seq"]["rle_raw"] = _rle_raw_frac(blocks)
     return out
+
+
+def _rle_raw_frac(blocks):
+    """Bytes in RLE and raw zstd blocks over all bytes, over every block (in
+    bitshuffled detector data mostly the all-zero high planes)."""
+    from . import zstdlib
+    rr = tot = 0
+    for z in blocks:
+        for fr in zstdlib.analyse(z):
+            if fr.get("skippable"):
+                continue
+            tot += fr["fcs"]                     # hdf5plugin frames carry their content size
+            rr += sum(b["size"] for b in fr["blocks"] if b["type"] in ("raw", "rle"))
+    return rr / max(tot, 1)
 
 
 def _mix_over(blocks):

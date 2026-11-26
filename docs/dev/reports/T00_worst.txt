@@ -22,6 +22,6 @@ many_frames           PASS  1000 chunks of 8 elements each: shapes [(1000, 8)], 
 block_tail_mix_lz4    PASS  chunk lengths with every tail 0-7 and a partial last block, every element size: tails [0, 1, 2, 3, 4, 5, 6, 7], 48 of 52 datasets end in a partial block, 572881 bytes round-tripped
 block_tail_mix_zstd2  PASS  chunk lengths with every tail 0-7 and a partial last block, every element size: tails [0, 1, 2, 3, 4, 5, 6, 7], 48 of 52 datasets end in a partial block, 17841617 bytes round-tripped
 exact_128k_block      PASS  compressed block of exactly 131072 bytes (decoder must accept; encoder must avoid): block types/sizes: compressed 131072
-large_frame_16m_u32   PASS  one 16M u32 frame of high dynamic range (large: not in the default set): shape (4362, 4148) max 1463264 (21 bit planes used), 72374304 bytes round-tripped
+large_frame_16m_u32   PASS  one 16M u32 frame of high dynamic range (large: not in the default set): shape (4362, 4148) max 1481864 (21 bit planes used), 72374304 bytes round-tripped
 
 24 cases, 0 failed

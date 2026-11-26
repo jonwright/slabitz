@@ -1,5 +1,6 @@
 {
  "B": 64,
+ "Bf": 32,
  "Bh": 32,
  "clip": 2.0,
  "dtype": "uint16",
@@ -18,6 +19,20 @@
   17999
  ],
  "hot_cluster": 1.0,
+ "hot_counts": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ],
  "hot_natural": 0.0,
  "hot_per_frame": 0.0,
  "k_edges": [
@@ -68,5 +83,5 @@
   2162,
   2068
  ],
- "version": 1
+ "version": 2
 }
