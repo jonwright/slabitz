@@ -243,6 +243,18 @@ output element by element with the reference and the oracle.
     scripts fixed (3 segfaults, 3 invalid-argument errors on `main`), every
     script reports a nonzero compared count, two retired; `sbz test-kernels`
     30 pass, 0 fail.
+31. **Test harness and performance gate** (2026-11-27, PRs #7-#9). T02
+    (5437d14, drafted by the DeepSeek worker, reviewed by Claude): `sbz
+    pytest` generated from the `sbz test` and `sbz test-kernels` lists,
+    `SLABITZ_REQUIRE_DATA=1` so missing data fails instead of skipping, and
+    7 committed pac fixtures (272 KB) whose merged-match counts are checked
+    with the oracle. T03 (85e6f2f): `bench/gate.py`, 164 cells (codec x data
+    x sync/async/device), wall rule >5% slower and above 3x the IQR, kernel
+    rule >20% and >20 us slower, an idle-GPU guard, and an L40S baseline that is compared only
+    on its own node (L40S nodes differ by 8-16%). Found on the way: lazy
+    CUDA module loading put ~400 us into profiled first launches, the
+    largest cells need an adaptive warmup, and thaumatin u32 zstd exceeds
+    the 1 GiB per-call limit.
 
 ## Publication snapshot
 

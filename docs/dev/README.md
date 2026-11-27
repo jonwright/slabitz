@@ -22,8 +22,8 @@ correctness (T06-T11), API (T12-T16), performance (T20-T21) and encoder
 | T-1 | [Shared agent root: one env, shared data, one worktree per task](T-1_agent_root.md) | Claude | - | done (b0e3eb6) |
 | T00 | [Synthetic test data matched to real data, plus worst cases](T00_synthetic_data.md) | Claude (models) + worker | T-1 | done (9088d09) |
 | T01 | [Kernel argument checks for every Python launcher](T01_kernel_arg_checks.md) | Claude | T-1 | done (e5e8271) |
-| T02 | [Test harness: pytest entry, required data, pac fixtures](T02_test_harness.md) | worker | T01, T00 | review |
-| T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01, T00 | review |
+| T02 | [Test harness: pytest entry, required data, pac fixtures](T02_test_harness.md) | worker | T01, T00 | done (5437d14) |
+| T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01, T00 | done (85e6f2f) |
 | T04 | [Explain the open performance questions](T04_perf_open_questions.md) | Claude | T03 | todo |
 | T05 | [Portable kernels and old cards re-check](T05_old_cards.md) | worker + user (hardware) | T01 | todo |
 | T06 | [zstd feature matrix with proof of coverage, round trips](T06_zstd_feature_matrix.md) | worker | T02 | todo |
