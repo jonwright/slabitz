@@ -155,7 +155,10 @@ typedef struct sbz_bshuf_geom {
  * per-chunk status and, if a chunk is corrupt or does not match `geom`, copies
  * the input back to the host and redoes the call there (slow path: the precise
  * error, or a correct decode of a chunk with another geometry). `dev_src` and
- * `chunks` must stay valid until sbz_dctx_wait returns. */
+ * `chunks` must stay valid until sbz_dctx_wait returns. The bytes must already be
+ * on the device when this is called: the context's stream is non-blocking and
+ * does not wait for copies on other streams (a cuMemcpyHtoD from pageable memory
+ * can return before its DMA lands; synchronize first). */
 SBZ_API int sbz_dctx_bslz4_decompress_device(sbz_dctx *dc, uint64_t dev_src, size_t srcSize,
                                            const sbz_frame_span *chunks, uint32_t nchunks,
                                            const sbz_bshuf_geom *geom);

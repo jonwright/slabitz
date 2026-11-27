@@ -19,7 +19,7 @@ Timing starts after every thread is warm (barrier), and counts calls/second.
   GZROOT=<repo> SLABITZ_KERNEL_DIR=<repo>/build python3 bench/p4_overlap.py FILE.h5 [calls]
 
 Time only on an idle GPU (check nvidia-smi; on the shared L40S node use a Slurm
-GPU job). Results 2026-11-20: docs/p4_readback_audit.md, section 5.
+GPU job). Results 2026-11-20: docs/archive/p4_readback_audit.md, section 5.
 """
 import ctypes as ct
 import os
@@ -152,6 +152,7 @@ def device_mode():
     d = ct.c_uint64()
     assert cu.cuMemAlloc_v2(ct.byref(d), len(src)) == 0
     assert cu.cuMemcpyHtoD_v2(d.value, src, len(src)) == 0
+    assert cu.cuCtxSynchronize() == 0  # input on the device before the first call
     g = Geom(e, fb, struct.unpack(">I", raw[0][8:12])[0])
 
     def go(k):

@@ -42,7 +42,7 @@ card from sm_35 to sm_90, and on newer cards through PTX.
 The 22 files are intentional. If a single distribution file is wanted later,
 add a host-side bundle (an index plus the module images) and load each kernel's
 slice by offset with `cuModuleLoadData`; never merge the kernels into one CUDA
-module. The wheel planned in `docs/plan_p4_api.md` can already carry the 22
+module. The wheel planned in `docs/archive/plan_p4_api.md` (now T13-T16 in `docs/dev/`) can already carry the 22
 fatbins as package data, so a single artifact does not require a single file
 inside it.
 - New `tools/build_fatbins.py`. For each `KERNEL_MAP` entry

@@ -79,6 +79,11 @@ def main():
         d = ct.c_uint64()
         assert cu.cuMemAlloc_v2(ct.byref(d), len(src)) == 0
         assert cu.cuMemcpyHtoD_v2(d.value, src, len(src)) == 0
+        # From pageable memory the copy can return before its DMA lands, and the
+        # context's stream is non-blocking (it does not wait for the legacy stream):
+        # without this sync the decode can read the input's last bytes too early, flag
+        # those chunks and replay (seen 2026-11-27: "u8 8k", replays 1, 6 of 7 runs).
+        assert cu.cuCtxSynchronize() == 0
         g = Geom(e, chunk_bytes, block_bytes)
         r0 = replays()
         rc = lib.sbz_dctx_bslz4_decompress_device(dc, d.value, len(src), spans, len(raws),

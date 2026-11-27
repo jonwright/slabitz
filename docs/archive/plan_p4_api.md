@@ -1,5 +1,9 @@
 # Plan: P4, streaming API, Python wrapper, wheel
 
+> Archived 2026-11-25. Folded into the task files in `docs/dev/` (P4: T12-T16;
+> P5: T02, T06, T11). Kept for its history and settled decisions; the task
+> files are the instructions.
+
 The P4 streaming item in `AGENTS.md`. Today every `sbz_dctx_*` call copies its input from
 host memory, reads counters back to the host several times, and syncs before
 returning. The target use is a stream of frames: the caller uploads batch
@@ -46,14 +50,14 @@ worker once steps 1-3 are in.
 ## Step 1: readback audit and measurement (no library code)
 
 Status (2026-11-20): done, waiting for the user's review:
-`docs/p4_readback_audit.md` and `bench/p4_overlap.py` (929609a). A first
+`docs/archive/p4_readback_audit.md` and `bench/p4_overlap.py` (929609a). A first
 attempt worked in the maintainer's checkout against a stale `build/` and reported the
 crash as a decoder bug; the library now refuses mismatched kernels
 (`sbz_kernels.id`). Work in the pixi workspace or a scratch clone. Time only
 on an idle GPU: the L40S login-node GPU is shared, so use a Slurm job on
 the `low-gpu` partition (`--gres=gpu:nvidia_l40s:1`).
 
-Write `docs/p4_readback_audit.md`:
+Write `docs/archive/p4_readback_audit.md`:
 
 - One row per host readback or sync inside a call. Today: `read_counters()`
   at the end of stage 0, stage 1 (plus the `FrameStatus` download), in the
