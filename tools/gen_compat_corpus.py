@@ -87,6 +87,29 @@ EXPECT_REJECT_MODES = {"streaming", "nocontent", "long30", "long31",
                        "patchfrom", "dict"}
 # long27 (window 2^27 < 2^29) decodes.
 
+# Extra per-input tasks, in addition to the MODES above: the same mode (and CLI
+# args) run on a *different* input.  Detector crops (raw little-endian frames,
+# no bitshuffle), a 1 MB incompressible random input (raw blocks), and a >= 24 MB
+# multi-frame detector input for -T0 so the multithreaded encoder really splits
+# the work into several jobs.
+EXTRA_TASKS = [
+    ("level1",   ["-1"],             "det_u16"),
+    ("level1",   ["-1"],             "det_u32"),
+    ("level3",   ["-3"],             "det_u16"),
+    ("level3",   ["-3"],             "det_u32"),
+    ("level3",   ["-3"],             "random"),
+    ("level19",  ["-19"],            "det_u16"),
+    ("level19",  ["-19"],            "det_u32"),
+    ("level19",  ["-19"],            "random"),
+    ("ultra22",  ["--ultra", "-22"], "det_u16"),
+    ("ultra22",  ["--ultra", "-22"], "det_u32"),
+    ("check",    ["--check"],        "det_u16"),
+    ("check",    ["--check"],        "det_u32"),
+    ("B65536",   ["-B65536"],        "det_u16"),
+    ("B65536",   ["-B65536"],        "det_u32"),
+    ("T0",       ["-T0"],            "det_multi"),
+]
+
 DICT_SAMPLES = 12
 DICT_SIZE = 4096
 
@@ -94,6 +117,11 @@ DICT_SIZE = 4096
 # multi-segment frame whose window descriptor is >= the requested log.
 # long27 -> 2^27 (128 MiB); long30 -> 2^30 (1 GiB); long31 -> 2^31 (2 GiB).
 LONG_SIZES = {"long27": 150, "long30": 1200, "long31": 2200}
+
+# detector crop width (columns) and the number of frames for the -T0 input.
+DET_NCOLS = 512
+T0_FRAMES = 6
+RANDOM_SIZE = 1024 * 1024   # 1 MB incompressible
 
 
 def sha256(b):
@@ -233,11 +261,23 @@ def prepare_long_files():
 
 
 def generate_inputs():
+    import numpy as np
+    det_u16 = crop_detector("silicon_u16_zstd2_256k.h5", "uint16", DET_NCOLS)
+    det_u32 = crop_detector("ceo2_u32_zstd2_256k.h5", "uint32", DET_NCOLS)
+    # det_multi: T0_FRAMES detector frames, each a small per-frame change so the
+    # encoder cannot collapse them into one long match -> -T0 must split jobs.
+    arr = np.frombuffer(det_u32, dtype=np.uint32).copy()
+    frames = []
+    for i in range(T0_FRAMES):
+        f = arr.copy()
+        f[::4096] = (f[::4096] + (i + 1)).astype(np.uint32)
+        frames.append(f.tobytes())
     return {
         "text": make_text(),
-        "random": make_random(),
-        "det_u16": crop_detector("silicon_u16_zstd2_256k.h5", "uint16", 512),
-        "det_u32": crop_detector("ceo2_u32_zstd2_256k.h5", "uint32", 512),
+        "random": make_random(RANDOM_SIZE),
+        "det_u16": det_u16,
+        "det_u32": det_u32,
+        "det_multi": b"".join(frames),
     }
 
 
@@ -306,9 +346,11 @@ def gen_full(log):
     full_files.mkdir(parents=True, exist_ok=True)
     entries = []
 
+    # MODES (text-based / window / patch / dict) plus every EXTRA_TASKS entry.
+    tasks = list(MODES) + [(m, a, i, False) for m, a, i in EXTRA_TASKS]
     for version in VERSIONS:
         cli = zstd_cli(version)
-        for mode, args_in, inkey, special in MODES:
+        for mode, args_in, inkey, special in tasks:
             args = list(args_in)
             data = inputs.get(inkey) if inkey not in longinfo else None
 
@@ -476,18 +518,21 @@ def gen_subset(log, full_entries):
     subset_dir.mkdir(parents=True, exist_ok=True)
     relmap = {}
     for e in full_entries:
-        relmap[(e["version"], e["mode"])] = e
+        relmap[(e["version"], e["name"])] = e
 
     chosen = {}
     for version in VERSIONS:
-        for mode in ("level3", "level19"):
-            e = relmap.get((version, mode))
+        # text-based levels + a detector-input file per level
+        for name in ("level3_text.zst", "level19_text.zst",
+                     "level3_det_u16.zst", "level19_det_u16.zst"):
+            e = relmap.get((version, name))
             if e and e["expectation"] == "decode":
-                chosen["%s/%s" % (version, mode)] = e
-        for mode in ("streaming", "long30"):
-            e = relmap.get((version, mode))
+                chosen["%s/%s" % (version, name)] = e
+        # no-FCS and window-30 expected-reject cases
+        for name in ("streaming_text.zst", "long30_long30.zst"):
+            e = relmap.get((version, name))
             if e and e["expectation"] == REJECT:
-                chosen["%s/%s" % (version, mode)] = e
+                chosen["%s/%s" % (version, name)] = e
 
     for e in full_entries:
         if e["kind"] == "bshuf":
@@ -526,12 +571,15 @@ def cmd_list(log):
     for v in VERSIONS:
         mark = "  (bitshuffle 0.4.0's bundled snapshot)" if v == BSHUF_ZSTD else ""
         print("  %s%s" % (v, mark))
-    print("modes:")
+    print("modes (on the text input; see below for extra inputs):")
     for mode, args, inkey, special in MODES:
         what = " ".join(args)
         if special:
             what = "--patch-from=<base>" if mode == "patchfrom" else "-D <dict>"
         print("  %-11s %s  (input: %s)" % (mode, what, inkey))
+    print("extra inputs:")
+    for mode, args, inkey in EXTRA_TASKS:
+        print("  %-11s %s  (input: %s)" % (mode, " ".join(args), inkey))
     print("  bitshuffle  filter-32008 chunks (zstd %s)" % BSHUF_ZSTD)
 
 

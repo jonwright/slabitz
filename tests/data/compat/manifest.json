@@ -57,6 +57,30 @@
     },
     {
       "version": "v1.4.7",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.4.7--level3_det_u16.zst",
+      "compressed_size": 13236,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.4.7",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.4.7--level19_det_u16.zst",
+      "compressed_size": 13436,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.4.7",
       "mode": "streaming",
       "input": "text",
       "kind": "zstd",
@@ -102,6 +126,30 @@
       "compressed_size": 1512,
       "decoded_sha256": "b253970ede89791ac51db93a57e331810ce63cf02c87bcc4119d015ac74e9228",
       "decoded_size": 120146
+    },
+    {
+      "version": "18d02cbf",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "18d02cbf--level3_det_u16.zst",
+      "compressed_size": 13236,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "18d02cbf",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "18d02cbf--level19_det_u16.zst",
+      "compressed_size": 13436,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
     },
     {
       "version": "18d02cbf",
@@ -153,6 +201,30 @@
     },
     {
       "version": "v1.4.9",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.4.9--level3_det_u16.zst",
+      "compressed_size": 13236,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.4.9",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.4.9--level19_det_u16.zst",
+      "compressed_size": 13436,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.4.9",
       "mode": "streaming",
       "input": "text",
       "kind": "zstd",
@@ -198,6 +270,30 @@
       "compressed_size": 1512,
       "decoded_sha256": "b253970ede89791ac51db93a57e331810ce63cf02c87bcc4119d015ac74e9228",
       "decoded_size": 120146
+    },
+    {
+      "version": "v1.5.0",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.5.0--level3_det_u16.zst",
+      "compressed_size": 13236,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.0",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.5.0--level19_det_u16.zst",
+      "compressed_size": 13436,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
     },
     {
       "version": "v1.5.0",
@@ -249,6 +345,30 @@
     },
     {
       "version": "v1.5.2",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.5.2--level3_det_u16.zst",
+      "compressed_size": 13242,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.2",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.5.2--level19_det_u16.zst",
+      "compressed_size": 13552,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.2",
       "mode": "streaming",
       "input": "text",
       "kind": "zstd",
@@ -294,6 +414,30 @@
       "compressed_size": 1493,
       "decoded_sha256": "b253970ede89791ac51db93a57e331810ce63cf02c87bcc4119d015ac74e9228",
       "decoded_size": 120146
+    },
+    {
+      "version": "v1.5.5",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.5.5--level3_det_u16.zst",
+      "compressed_size": 13242,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.5",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.5.5--level19_det_u16.zst",
+      "compressed_size": 13092,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
     },
     {
       "version": "v1.5.5",
@@ -345,6 +489,30 @@
     },
     {
       "version": "v1.5.6",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.5.6--level3_det_u16.zst",
+      "compressed_size": 13242,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.6",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.5.6--level19_det_u16.zst",
+      "compressed_size": 13255,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.6",
       "mode": "streaming",
       "input": "text",
       "kind": "zstd",
@@ -393,6 +561,30 @@
     },
     {
       "version": "v1.5.7",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.5.7--level3_det_u16.zst",
+      "compressed_size": 13242,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.7",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.5.7--level19_det_u16.zst",
+      "compressed_size": 13255,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.5.7",
       "mode": "streaming",
       "input": "text",
       "kind": "zstd",
@@ -438,6 +630,30 @@
       "compressed_size": 1493,
       "decoded_sha256": "b253970ede89791ac51db93a57e331810ce63cf02c87bcc4119d015ac74e9228",
       "decoded_size": 120146
+    },
+    {
+      "version": "v1.6.0",
+      "mode": "level3",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level3_det_u16.zst",
+      "file": "v1.6.0--level3_det_u16.zst",
+      "compressed_size": 13242,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
+    },
+    {
+      "version": "v1.6.0",
+      "mode": "level19",
+      "input": "det_u16",
+      "kind": "zstd",
+      "expectation": "decode",
+      "name": "level19_det_u16.zst",
+      "file": "v1.6.0--level19_det_u16.zst",
+      "compressed_size": 13255,
+      "decoded_sha256": "c2578b909dd5a47ed65135ec3d55d59eec031a78366f701c56bbc7857b74e9a2",
+      "decoded_size": 2213888
     },
     {
       "version": "v1.6.0",

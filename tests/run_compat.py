@@ -265,7 +265,16 @@ def worker(args):
     for entry in entries:
         CURRENT[0] = "%s/%s" % (entry["version"], entry["mode"])
         filepath = os.path.join(args.dir, entry["file"])
-        data = open(filepath, "rb").read()
+        try:
+            data = open(filepath, "rb").read()
+        except OSError:
+            results.append({"key": "%s|%s" % (entry["version"], entry["name"]),
+                            "name": entry["name"], "mode": entry["mode"],
+                            "version": entry["version"],
+                            "expectation": entry["expectation"],
+                            "status": "FAIL",
+                            "reason": "missing file: %s" % filepath})
+            continue
         r = {"key": "%s|%s" % (entry["version"], entry["name"]),
              "name": entry["name"], "mode": entry["mode"],
              "version": entry["version"], "expectation": entry["expectation"],
