@@ -26,6 +26,23 @@ plan (`docs/archive/plan_p5_tests.md`).
   (`RmProfilingAdminOnly: 1`), and the sanitizer may hit the same limit:
   check first.
 
+- **Known faults from T06** (`docs/dev/reports/T06.md`). Both gave an
+  illegal memory access (CUresult 700), not an error code or wrong bytes:
+  - a malformed RLE-literals section: size format 0 (a 5-bit
+    regenerated size, at most 31) with a declared size of 500, so the
+    section is shorter than the frame's content size (an early version of
+    `hand-rle-literals-sf0`; section "The development-time context
+    crash");
+  - a wrong FSE table index: the repeat-mode (mode 3) path of
+    `PARSE_FSE_TABLE` pointed at the predefined table (a temporary
+    transform edit, reviewer check #2), which faults on `zstd-u32-l8`.
+    The input-side equivalent is a sequence section whose mode byte says
+    "repeat" where the previous table differs, or where there is none.
+- **One fault ends the process.** The library uses the device's primary
+  CUDA context, so after an illegal memory access no later call in the
+  same process can run, even with a new dctx. Hence one subprocess per
+  input below.
+
 ## Read first
 
 `AGENTS.md`; `src/host_walk.c` (how to find compressed-block byte ranges);
@@ -43,6 +60,12 @@ cases for LZ4); `docs/archive/plan_p5_tests.md`.
   - Mutation kinds: single bit flip, single byte set to 0x00 or 0xFF, a
     run of 8 random bytes, and truncating the block's last 4 bytes
     (adjusting the header size).
+  - Two named seeds from T06, before the random ones: an RLE-literals
+    section whose regenerated size disagrees with the frame content size
+    (built like `hand-rle-literals-sf*` in `tests/run_features.py`), and a
+    compressed block whose sequence-section mode byte is changed to
+    repeat (3) for each of LL, OF and ML in turn, on the first block of a
+    frame (no previous table) and on a later block.
   - Decode each input in a subprocess under `timeout 20`.
   - **Required:** no hang, no crash (the process exit code), and no
     out-of-bounds write. Pad the output allocation with canary bytes, and

@@ -32,7 +32,17 @@ PR, with a gate `--compare` table. An item that does not pay is recorded in
    events. Add `bench/stream_pipeline.py`, which reaches max(upload,
    device) per frame. Target: within 10% of max(upload, device) for CeO2
    LZ4 and zstd on the L40S.
-6. **CUDA graphs** (lowest priority).
+6. **Stock LZ4 with host input beyond 16 frames** (T04 question 3).
+   Per-frame wall rises 0.277 -> 0.319 -> 0.485 ms at 4 / 16 / 64 CeO2
+   frames per call (`lz4/ceo2_u32_mask0/sync`), while the device-input
+   path falls and pac-lz4 (56 kB blocks) stays flat. About 12 ms of a
+   64-frame call is host-side and unmeasured. Hypothesis: the host block
+   walk reads every 8 kB block header of a 252 MB input that no longer
+   fits the CPU cache, before the upload reads it again. First put host
+   timers around the walk and the upload, then fix it if it is the walk
+   (for example, walk in pieces between uploads). Target: per-frame wall
+   at 64 frames no higher than at 16.
+7. **CUDA graphs** (lowest priority).
    - **Expected gain:** phase 3 measured the fixed cost per call as device
      time, not launches, so graphs would save at most about 0.2 ms per
      zstd call.

@@ -106,6 +106,20 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
     untouched. Run it sync and async.
   - Update the T06 and T07 expectations from `reject:SBZ_ERR_CORRUPT` to
     `reject:SBZ_ERR_UNSUPPORTED` where it applies.
+  - **T06's one xfail.** `hand-dict-id-1` in `tests/run_features.py`
+    (reproducer `tests/data/features_bugs/did_field.zst`, 150 bytes) is a
+    frame with a `Dictionary_ID` field of value 0. libzstd decodes it, the
+    host walk accepts it today, and the GPU parser rejects it at the
+    block-count cross-check ("block counts GPU raw/rle/cmp 0/0/0 != host
+    1/0/0"). Under this design its expectation becomes
+    `reject:SBZ_ERR_UNSUPPORTED` with "frame 0: dictionary"; then remove
+    the reproducer and its README line, or keep the frame as a host-walk
+    case.
+  - **Output cap reproducer** (T04 question 3): the gate's CeO2 zstd2
+    twins at 64 frames per call (`bench/gate.py --only twin/ceo2_zstd2
+    --frames 64`) need 1,144,580,096 output bytes and return CORRUPT
+    today ("frame 0: status 0xa07a0006"). After this task they must
+    return LIMIT before any GPU work, or decode if the cap is lifted.
 
 ## Files that may change
 
@@ -113,7 +127,8 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
 `tools/transform_ds_for_slang.py`, the affected `kernels/*.slang`,
 `src/sbz_kernels_gen.h` (regenerated), `tests/run_host_walk.py`,
 `tests/fuzz_host_walk.c` (seeds), `tests/run_frame_bounds.py`,
-`tests/run_features.py` and `tests/run_compat.py` (expectations), `pixi.toml`,
+`tests/run_features.py` and `tests/run_compat.py` (expectations),
+`tests/data/features_bugs/*`, `pixi.toml`,
 `AGENTS.md`, `docs/dev/reports/T09.md`.
 
 ## Acceptance

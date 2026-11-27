@@ -2,7 +2,8 @@
 
 Status: todo
 Executor: Claude
-Depends on: T03 (gate), T04 (the answers to the open performance questions)
+Depends on: T03 (gate), T04 (the answers to the open performance questions),
+T04a (what costs the stock ExecuteSequences time)
 Branch: `t20-exec-parallel`
 
 ## Goal
