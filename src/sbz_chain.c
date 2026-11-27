@@ -286,7 +286,11 @@ static int be_fail(sbz_dctx *dc, int code, const char *what)
 /* Sets buffer b's logical size to count elements, growing its allocation if
  * needed. Contents are NOT preserved or initialised (like DS's placed heaps):
  * every buffer is written by a memset or a kernel before it is read. */
-static int buf_size(sbz_dctx *dc, int b, uint64_t count)
+/* Sizes buffer b to `count` elements, allocating `slack` more bytes behind them
+ * that the kernels may read but that are not part of the buffer: its size, the
+ * element count bound to kernels and what sbz_dctx_read_buffer returns stay
+ * `count` elements. */
+static int buf_size_slack(sbz_dctx *dc, int b, uint64_t count, uint32_t slack)
 {
     sbz_buf *x = &dc->buf[b];
     uint64_t bytes = count * kBufInfo[b].esize;
@@ -295,16 +299,30 @@ static int buf_size(sbz_dctx *dc, int b, uint64_t count)
     if (bytes > ((uint64_t)1 << 40))
         return fail(dc, SBZ_ERR_LIMIT, "buffer %s: %llu bytes", kBufInfo[b].name,
                     (unsigned long long)bytes);
-    if (bytes > x->cap) {
+    if (bytes + slack > x->cap) {
         dc->be->ops->free(dc->be, x->ptr);
         x->ptr = 0;
         x->cap = 0;
-        BE_TRY(dc->be->ops->alloc(dc->be, (size_t)bytes, &x->ptr), kBufInfo[b].name);
-        x->cap = (size_t)bytes;
+        BE_TRY(dc->be->ops->alloc(dc->be, (size_t)(bytes + slack), &x->ptr), kBufInfo[b].name);
+        x->cap = (size_t)(bytes + slack);
     }
     x->bytes = (size_t)bytes;
     return SBZ_OK;
 }
+
+static int buf_size(sbz_dctx *dc, int b, uint64_t count)
+{
+    return buf_size_slack(dc, b, count, 0);
+}
+
+/* T11a: ExecuteSequences' fused copy fast paths (EXEC_VEC_PATCHES in the
+ * transform) load litBuf[litOfs + lane] for every lane of a sequence, also the
+ * lanes that copy match bytes, and then select: up to 63 bytes past a block's
+ * literals. The values are not used, but the loads must stay inside an
+ * allocation, so both literal sources get this much slack: DecompressedLiterals
+ * (Huffman-coded literals) and CompressedData (raw literals). Padding costs
+ * nothing in the per-match loop; a per-lane guard would (T04a). */
+#define SBZ_LITERAL_READ_SLACK 64u
 
 static int buf_fill(sbz_dctx *dc, int b, uint32_t value)
 {
@@ -665,7 +683,7 @@ static int stage0(sbz_dctx *dc)
     const uint32_t lb = lookback_count(nf);
 
     /* zstdgpu_ResourceInfo_Stage_0_InitSize */
-    TRY(buf_size(dc, B_CompressedData, dc->src_bytes_padded / 4u));
+    TRY(buf_size_slack(dc, B_CompressedData, dc->src_bytes_padded / 4u, SBZ_LITERAL_READ_SLACK));
     TRY(buf_size(dc, B_FramesRefs, nf));
     TRY(buf_size(dc, B_FseProbsDefault, NB(kFseProbsDefault)));
     TRY(buf_size(dc, B_Counters, 1));
@@ -957,7 +975,7 @@ static int stage2(sbz_dctx *dc)
                     (unsigned long long)totalUncomp);
 
     /* zstdgpu_ResourceInfo_Stage_2_InitSize (UnCompressedFramesData/Refs are external). */
-    TRY(buf_size(dc, B_DecompressedLiterals, cntLit));
+    TRY(buf_size_slack(dc, B_DecompressedLiterals, cntLit, SBZ_LITERAL_READ_SLACK));
     TRY(buf_size(dc, B_DecompressedSequenceLLen, cntSeq));
     TRY(buf_size(dc, B_DecompressedSequenceMLen, cntSeq));
     TRY(buf_size(dc, B_DecompressedSequenceOffs, cntSeq));

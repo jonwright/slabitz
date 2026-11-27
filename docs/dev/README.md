@@ -33,7 +33,7 @@ correctness (T06-T11), API (T12-T16), performance (T04a, T20-T21) and encoder
 | T09 | [Decoder: matching rejects, error codes, bounds](T09_decoder_rejects_bounds.md) | Claude | T07 | done (bb081d1) |
 | T10 | [Decoder: frames without a content size](T10_no_fcs_frames.md) | Claude | T09 | todo |
 | T11 | [Corrupt compressed blocks on the GPU, compute-sanitizer](T11_gpu_corrupt_sanitizer.md) | worker (fixes: Claude) | T02 | review |
-| T11a | [ExecuteSequences reads past the end of the literals](T11a_literal_overread.md) | Claude | T11 | todo |
+| T11a | [ExecuteSequences reads past the end of the literals](T11a_literal_overread.md) | Claude | T11 | review |
 | T11b | [GPU faults on corrupt Huffman, FSE and sequence data](T11b_gpu_faults_corrupt_blocks.md) | Claude | T11, T09 | todo |
 | T12 | [P4 step 2c for zstd: chunk walk on the device](T12_zstd_device_walk.md) | Claude | T03 | todo |
 | T13 | [Public C API `include/slabitz.h`](T13_public_c_api.md) | Claude | T12 | todo |

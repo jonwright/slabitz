@@ -1,6 +1,6 @@
 # T11a: ExecuteSequences reads past the end of the literals
 
-Status: todo
+Status: review (`docs/dev/reports/T11a.md`)
 Executor: Claude (host allocation; kernel only if padding is not enough)
 Depends on: T11 (the finding and `tests/run_sanitizer.sh`)
 Branch: `t11a-literal-overread`
