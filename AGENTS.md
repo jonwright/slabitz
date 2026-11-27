@@ -208,7 +208,9 @@ size, a block over 128 KiB, and a match reaching before its frame's start
 (`--patch-from` frames) set a per-frame status and return `SBZ_ERR_CORRUPT`;
 such blocks are not written, so neighbours stay intact. Other
 compressed-block contents (Huffman, FSE, literals sections) are still
-trusted by the kernels [T11].
+trusted by the kernels: T11's fuzz (`tests/run_gpu_corrupt.py`, slow) finds
+11 GPU faults in 2008 corrupt inputs [T11b]; ExecuteSequences reads up to 63
+bytes past the literals of valid frames (memcheck) [T11a].
 
 Out of scope for v1: dictionaries (rejected, UNSUPPORTED), GPU checksum verification
 (checksums are skipped). Compression is planned (T17-T19: LZ4 first, then

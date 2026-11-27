@@ -13,9 +13,13 @@ under a timeout, separately counting every outcome:
                  original decode (zstd checksums are not verified on the GPU)
   canary-hit     rc == 0 but a neighbour frame/chunk is damaged -- an
                  out-of-bounds write, the thing this job hunts (REQUIRED ZERO)
-  err-neighbour  rc < 0 AND a neighbour differs -- counted and reported, not
-                 failed (output is undefined after an error today; T09 adds
-                 per-frame bounds)
+  err-neighbour  not used any more (kept in the table as 0). An error leaves
+                 the whole call's output undefined: an early error writes
+                 nothing (bitshuffle output is not written at all), and a
+                 corrupt frame can spoil other frames of the call through
+                 shared decode state (literal and sequence prefix sums) without
+                 writing outside its range. Writes outside a frame's range show
+                 as canary-hit (rc 0); every error counts as error-code.
   gpu-fault      the call returned an error whose message contains a CUresult
                  (e.g. "CUresult 700"); the process can no longer use the GPU
                  (REQUIRED ZERO)
@@ -671,7 +675,7 @@ def build_named_seeds(bases):
                 check_middle=True)
 
     # --- T07 seed: --patch-from frame (expected to fault the GPU), decoded alone.
-    pf = os.path.join(ROOT, "tests", "data", "compat_bugs", "patchfrom_frame.zst")
+    pf = os.path.join(ROOT, "tests", "data", "frame_bounds", "patchfrom_frame.zst")
     if os.path.exists(pf):
         src = open(pf, "rb").read()
         jobs.insert(0, dict(label="t07-patchfrom", kind="zstd-single", triple=src,
@@ -708,13 +712,15 @@ def run_worker(job, lib=None):
     try:
         if kind == "zstd":
             rc = lib.sbz_dctx_decompress_frames(dc, triple, len(triple), arr, len(spans))
-            out = read_buf(lib, dc, "UnCompressedFramesData") if rc == 0 else b""
+            outbuf = "UnCompressedFramesData"
         else:
             fn = ("sbz_dctx_bshuf_decompress" if kind == "bshuf"
                   else "sbz_dctx_bslz4_decompress")
             rc = getattr(lib, fn)(dc, triple, len(triple), arr, len(spans), elem)
-            out = read_buf(lib, dc, "BshufOutput") if rc == 0 else b""
+            outbuf = "BshufOutput"
         errmsg = lib.sbz_dctx_error(dc).decode() if rc else ""
+        # output is defined only after success
+        out = read_buf(lib, dc, outbuf) if rc == 0 else b""
         # the reference for the good neighbours (precomputed per base)
         ref = job["ref"]
         return classify(layout, ref, job.get("check_middle", False), rc, errmsg, out)
@@ -741,8 +747,6 @@ def classify(layout, ref, check_middle, rc, errmsg, out):
     if rc != 0:
         if "CUresult" in errmsg or rc == SBZ_ERR_BACKEND:
             return "gpu-fault", rc, errmsg
-        if not canary_ok:
-            return "err-neighbour", rc, errmsg
         return "error-code", rc, errmsg
     if not canary_ok:
         return "canary-hit", 0, ""

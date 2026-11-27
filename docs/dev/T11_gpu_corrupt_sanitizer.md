@@ -1,6 +1,6 @@
 # T11: Corrupt compressed blocks on the GPU, and compute-sanitizer
 
-Status: todo
+Status: review (`docs/dev/reports/T11.md`; follow-ups T11a, T11b)
 Executor: worker (finding problems); Claude (fixing them, as follow-up tasks)
 Depends on: T02
 Branch: `t11-gpu-corrupt`
