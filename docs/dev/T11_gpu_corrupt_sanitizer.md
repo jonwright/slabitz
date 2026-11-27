@@ -38,6 +38,11 @@ plan (`docs/archive/plan_p5_tests.md`).
     transform edit, reviewer check #2), which faults on `zstd-u32-l8`.
     The input-side equivalent is a sequence section whose mode byte says
     "repeat" where the previous table differs, or where there is none.
+- **Known fault from T07** (`docs/dev/reports/T07.md`): a match offset
+  that reaches before the start of the frame (`--patch-from` frames,
+  reproducer `tests/data/compat_bugs/patchfrom_frame.zst`). T09 adds the
+  bound check; if T09 is not merged yet, expect offset mutations to hit
+  it, and count them under that one root cause.
 - **One fault ends the process.** The library uses the device's primary
   CUDA context, so after an illegal memory access no later call in the
   same process can run, even with a new dctx. Hence one subprocess per
@@ -66,6 +71,9 @@ cases for LZ4); `docs/archive/plan_p5_tests.md`.
     compressed block whose sequence-section mode byte is changed to
     repeat (3) for each of LL, OF and ML in turn, on the first block of a
     frame (no previous table) and on a later block.
+  - A third named seed, from T07: the `--patch-from` frame above, and an
+    offset-code mutation of a valid frame's first sequence that makes the
+    first match reach before the frame start.
   - Decode each input in a subprocess under `timeout 20`.
   - **Required:** no hang, no crash (the process exit code), and no
     out-of-bounds write. Pad the output allocation with canary bytes, and

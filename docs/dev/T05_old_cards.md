@@ -25,6 +25,12 @@ kernel edits. sm_50 has never been run.
   - Neither `build/sm_35` nor `build/kernels` has been rebuilt or
     spot-checked since the `pac-zstd` kernel edits (a0338bf, b840caa) and
     692e3f9.
+- **Smoke check on crunch (Claude, 2026-11-27, main bc43e16).** The
+  published `build/sm_35` set carries kernel ID `6446e283157f4598`, equal
+  to `SBZ_KERNELS_ID` in the sources. On the TITAN Black with it,
+  `tests/run_chain_stage2.py` passed 6/6 and `tests/run_pac_fixtures.py`
+  passed 5/5 (sync, async, CPU). This is not the full step 3 below:
+  `build/kernels`, `check_bshuf.py` and the suite were not run.
 - **Fermi is not supported.** sm_20 (crunch's Quadro 600) is the
   documented floor failure: the library must fail there cleanly with
   `SBZ_ERR_KERNEL` ("no kernel image").

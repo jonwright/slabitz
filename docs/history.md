@@ -271,6 +271,20 @@ output element by element with the reference and the oracle.
     `Dictionary_ID` field of value 0 is rejected by the GPU parser (T09),
     and a malformed RLE-literals section or a wrong FSE table faults the GPU
     and poisons the primary context for the rest of the process (T11).
+33. **Stock regression accepted, zstd version corpus** (2026-11-27, PRs
+    #14-#15). T04a (a4ff031): b840caa's ExecuteSequences slowdown on stock
+    zstd is +6-7% wall on four frame types with many short matches, and
+    pac-zstd is 3-25% faster on every cell. Variants built from patches
+    showed that neither the aliasing views nor any single branch is the
+    cause: it is per-match code in front of an unchanged byte loop, in a
+    latency-bound kernel with one wave per frame. No fix keeps the pac
+    gains; the user accepted the trade and the cause went to T20. T07
+    (f4ef955, drafted by the DeepSeek worker, reviewed by Claude): 283
+    frames from nine zstd versions, bitshuffle 0.4.0's bundled zstd to
+    1.6.0, plus bitshuffle 0.4.0 chunks, all decode byte-exact or reject
+    as expected. Two GPU faults found, both for T09: `--patch-from` frames
+    reach before the frame start, and a no-FCS frame faults a dctx that
+    has decoded before.
 
 ## Publication snapshot
 

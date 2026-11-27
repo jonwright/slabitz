@@ -61,7 +61,7 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | Test harness | `sbz pytest` runs every `sbz test` and `sbz test-kernels` script (generated from the lists; markers `gpu`, `slow`); `SLABITZ_REQUIRE_DATA=1` turns missing data into failures; committed pac fixtures `data/pac` (7 cases, 272 KB) checked by `tests/run_pac_fixtures.py`; `docs/dev/reports/T02.md` |
 | P4 streaming API | async LZ4 + zstd calls, device-input LZ4 (`sbz_dctx_*_async`, `_device`, `sbz_dctx_wait`); zstd device input, public header, per-chunk status: T12, T13 |
 | zstd feature matrix (T06) | `tests/run_features.py` (in `sbz test`): 366 frames (libzstd 1.5.7 plus hand-built RLE literals, RLE and raw blocks), every frame-header, literals and sequence-mode cell covered by a byte-exact decode, 46.6 MB compared per pass, per-entry and shared-context passes; one xfail, a `Dictionary_ID` field of value 0 (T09); `tests/run_roundtrip.py` (slow): 1362 cases, 657 MB; `docs/dev/reports/T06.md` |
-| zstd version coverage | corpus from libzstd 1.5.7 only; target bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0: T06, T07, T09, T10 |
+| zstd version coverage (T07) | `tests/run_compat.py` (in `sbz test`, 58 committed entries; `--full` on `data/compat/`, 283 entries, 2.06 GB compared): 9 zstd versions from bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0 plus 4 bitshuffle 0.4.0 chunks; every decode byte-exact, every expected reject (no FCS, window 2^30/2^31, dictionary) returns CORRUPT; `--patch-from` frames fault the GPU on every version (T09); `docs/dev/reports/T07.md` |
 | Per-kernel Python scripts | every launcher calls `tests/kparams.check_args` (signatures parsed from `src/sbz_kernels_gen.h`) before launch; `sbz test-kernels` runs 22 scripts + 8 modes, 30 pass with nonzero compared counts, 2 retired (`run_parse_blocks`, `smoke_initfsetable`); `docs/dev/reports/T01.md` |
 | Performance regression gate | `bench/gate.py`: 164 cells, L40S baseline `bench/baselines/l40s.json` (node frcrg-gpu5l40s-01); `docs/dev/reports/T03.md`: T03 |
 | Open performance questions (T04) | L40S, `docs/dev/reports/T04.md`: pac 0.2.0 frames are 3.5% faster than 0.1 frames on the current kernel (the 1050 Ti "+30% ExecuteSequences" mixed a kernel and a frame change; 1050 Ti recheck in T05); CeO2 zstd time per frame falls with frames per call (1 -> 64: 5-9x), stock LZ4 with host input rises beyond 16 frames (host side, device input does not); fused LZ4 never slower (1.05-2.69x); b840caa made ExecuteSequences 8-19% slower on stock zstd with many plane repeats (wall +5-7%): not the views but per-match code in front of the byte loop in a latency-bound one-wave-per-frame kernel, no fix in the transform keeps the pac gains (T04a), left to T20 |
@@ -205,7 +205,9 @@ as a limit]; host and GPU rejects differ and surface as "block counts GPU !=
 host" [T09]; decoded size is not checked against FCS, so a lying frame can
 overwrite its neighbour [T09]; output per call is capped at 1 GiB by the DS
 request limit [T09]; compressed-block contents are trusted by the kernels
-[T11]; the test corpus comes from libzstd 1.5.7 only [T06, T07].
+[T11]; a match offset reaching before the start of its frame (a `--patch-from`
+frame) faults the GPU [T09]; a no-FCS frame in a dctx that decoded a normal
+frame before faults the GPU [T09].
 
 Out of scope for v1: dictionaries (rejected), GPU checksum verification
 (checksums are skipped). Compression is planned (T17-T19: LZ4 first, then

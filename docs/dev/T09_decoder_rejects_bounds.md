@@ -44,6 +44,26 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
   (ch:921). The GPU accepts only 0x3FFFFFFF (1 GiB) per request
   (`zstdgpu_shared_structs.h:58-64`); beyond that, frames get status
   `RequestTooLarge` and the call returns CORRUPT.
+- **Two GPU faults found by T07** (`docs/dev/reports/T07.md`). Both give an
+  illegal memory access (CUresult 700) that ends the process's use of the
+  GPU (primary context), not an error code:
+  - **A match offset before the start of the frame.** A frame written by
+    `zstd --patch-from=<base>` has no Dictionary_ID; its first matches
+    point into the base, which the decoder does not have (offset 389 after
+    a few bytes of output). ExecuteSequences reads before the frame's
+    base. Same fault for all 9 corpus versions. Reproducer:
+    `tests/data/compat_bugs/patchfrom_frame.zst` (1432 B, with
+    `patchfrom_base.bin` for libzstd). Nothing in the header marks such a
+    frame, so the host walk cannot reject it; only the kernel can see it.
+  - **A no-FCS frame in a dctx that decoded a normal frame before.** In a
+    fresh dctx the frame is rejected cleanly (CORRUPT). After one good
+    `sbz_dctx_decompress` call in the same dctx, the no-FCS frame faults
+    in `DecompressedLiterals` allocation, and every later call fails.
+    Checked by Claude 2026-11-27 with `v1.5.7--level3_text.zst` then
+    `v1.5.7--streaming_text.zst` from `tests/data/compat/`. The host-walk
+    reject below removes the trigger; find the cause anyway (state from
+    the previous call used by the failing path), since another reject
+    path may hit it.
 - **Error codes** are in `src/sbz_backend.h:37-42`: BACKEND, NOMEM, ARGS,
   KERNEL, CORRUPT, LIMIT.
 
@@ -74,7 +94,9 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
   - missing FCS gives UNSUPPORTED, "frame N: no content size". T10 turns
     this into support.
 
-  The GPU parser keeps its checks as a second line of defence. The
+  The GPU parser keeps its checks as a second line of defence. Every
+  host-walk reject must leave the dctx usable: a good call after it
+  decodes. The
   cross-check message is extended to name the GPU frame status
   (`MissingContentSize`, `WindowTooLarge` and so on) when the counts
   disagree.
@@ -91,6 +113,14 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
   transform or the Slang entries. Performance must stay within the T03
   gate: a per-sequence compare against a bound in a register should be
   negligible; measure it.
+- **Back-reference bound.** ExecuteSequences (and FusedCopy) checks each
+  match offset against the bytes the frame has produced so far
+  (`offset <= dstOfs - frameBase`). A match that reaches before the
+  frame sets a per-frame status bit and copies nothing; the wait reports
+  CORRUPT, "frame N: match offset before frame start". This covers the
+  `--patch-from` frames: they get CORRUPT, not UNSUPPORTED, because they
+  cannot be told apart from a corrupt frame. Measure it with the
+  write clamp above, against the same gate.
 - **Output cap.** Either lift the GPU's 1 GiB request limit, or make the
   host return LIMIT, "call output exceeds 1 GiB", before any GPU work.
   Choose whichever is simpler and record the choice. Callers split
@@ -115,6 +145,15 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
     `reject:SBZ_ERR_UNSUPPORTED` with "frame 0: dictionary"; then remove
     the reproducer and its README line, or keep the frame as a host-walk
     case.
+  - **T07 expectations.** In `tests/data/compat/manifest.json` and
+    `data/compat/manifest.json`: `streaming`, `nocontent`, `long30`,
+    `long31` and `dict` become `reject:SBZ_ERR_UNSUPPORTED`; `patchfrom`
+    becomes `reject:SBZ_ERR_CORRUPT` and must pass. Then remove
+    `tests/data/compat_bugs/` (or keep the frame as a named GPU case in
+    `tests/run_frame_bounds.py`).
+  - **dctx reuse.** In `tests/run_frame_bounds.py`, one dctx: a good
+    frame, then each reject case (no FCS, window, dictionary, patch-from),
+    each followed by a good frame that must decode byte-exact.
   - **Output cap reproducer** (T04 question 3): the gate's CeO2 zstd2
     twins at 64 frames per call (`bench/gate.py --only twin/ceo2_zstd2
     --frames 64`) need 1,144,580,096 output bytes and return CORRUPT
@@ -128,7 +167,9 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
 `src/sbz_kernels_gen.h` (regenerated), `tests/run_host_walk.py`,
 `tests/fuzz_host_walk.c` (seeds), `tests/run_frame_bounds.py`,
 `tests/run_features.py` and `tests/run_compat.py` (expectations),
-`tests/data/features_bugs/*`, `pixi.toml`,
+`tests/data/features_bugs/*`, `tests/data/compat/manifest.json`,
+`tests/data/compat_bugs/*`, `data/compat/manifest.json` (shared root),
+`pixi.toml`,
 `AGENTS.md`, `docs/dev/reports/T09.md`.
 
 ## Acceptance
@@ -140,9 +181,11 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
    - the code is CORRUPT;
    - the neighbour frames are byte-exact;
    - 0 canary bytes are changed.
-3. `python3 tests/run_compat.py --full ...` (T07): all former
-   `reject:SBZ_ERR_CORRUPT` cells now report UNSUPPORTED with the matching
-   message, and nothing that decoded before fails.
+3. `python3 tests/run_compat.py --full $SLABITZ_DEV_ROOT/data/compat`
+   (T07): all former `reject:SBZ_ERR_CORRUPT` cells now report
+   UNSUPPORTED with the matching message, the 9 `patchfrom` cells report
+   CORRUPT ("match offset before frame start") with no fault, FAILs=0,
+   and nothing that decoded before fails.
 4. `bench/gate.py --compare`: no cell regresses beyond the gate
    thresholds.
 5. `sbz test` and `sbz test-kernels` pass. `build/sm_35` and
@@ -154,5 +197,7 @@ Refs: `hw` = `src/host_walk.c`, `ds` =
 - Remove the new clamp in ExecuteSequences (temporary transform edit)
   and rebuild: `run_frame_bounds.py` must report changed canary bytes or a
   damaged neighbour.
+- Remove the back-reference check: the `patchfrom` cells must fault
+  again.
 - Remove the window check from the host walk: the window-2^29 named case
   must fail.
