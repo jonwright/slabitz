@@ -285,6 +285,21 @@ output element by element with the reference and the oracle.
     as expected. Two GPU faults found, both for T09: `--patch-from` frames
     reach before the frame start, and a no-FCS frame faults a dctx that
     has decoded before.
+34. **Rejects and frame bounds; corrupt-block fuzz** (2026-11-27, PRs
+    #16-#17). T05 (partial): the GTX 1050 Ti passes the suite with the
+    portable kernels and does not reproduce T04's "+30%". T09 (bb081d1):
+    valid zstd the decoder does not handle (dictionary, window >= 2^29, no
+    content size) is rejected on the host with the new SBZ_ERR_UNSUPPORTED,
+    and calls over 1 GiB return LIMIT, both before any GPU work. On the
+    GPU, a block that does not fit its frame is not written and the frame
+    gets a status, and a new parallel kernel checks every match offset
+    against the frame start; `--patch-from` frames now return CORRUPT. The
+    first version checked offsets inside ExecuteSequences' loop and failed
+    the gate (+25% on min_matches): the T04a lesson again. T11 (drafted by
+    the DeepSeek worker, reviewed by Claude): a corrupt-block fuzz of 2008
+    inputs went from 310 silent overruns and 81 GPU faults to 0 and 11
+    with T09; the rest is T11b, and a literal over-read found by memcheck
+    is T11a.
 
 ## Publication snapshot
 
