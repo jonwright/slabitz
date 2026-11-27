@@ -52,7 +52,7 @@ KDIR = os.environ.get("SLABITZ_KERNEL_DIR", os.path.join(ROOT, "build"))
 BUGS = os.path.join(ROOT, "tests", "data", "features_bugs")
 ZSTD_MAGIC = 0xFD2FB528
 SKIP_BASE = 0x184D2A50
-SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT = -5, -6
+SBZ_ERR_BACKEND, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT = -1, -5, -6
 WEIGHT_2_29 = 1 << 29
 LIT_NAME = {0: "raw", 1: "rle", 2: "compressed", 3: "treeless"}
 
@@ -113,16 +113,29 @@ def read_buf(lib, dc, name):
     return b.raw[:n.value]
 
 
+# The entry being decoded, for the message when the GPU faults. The library uses the device's
+# primary context, so an illegal memory access poisons it for the rest of the process: every
+# later sbz_dctx_create_cuda fails. A fresh dctx per entry does not isolate a GPU fault; the
+# run stops at the first one and names the entry (main() below).
+CURRENT = ["<none>"]
+
+
+class GpuFault(RuntimeError):
+    pass
+
+
 def make_dctx(lib):
     err = ct.create_string_buffer(512)
     dc = lib.sbz_dctx_create_cuda(0, KDIR.encode(), err, len(err))
     if not dc:
-        raise RuntimeError("sbz_dctx_create_cuda: %s" % err.value.decode())
+        raise GpuFault("sbz_dctx_create_cuda: %s" % err.value.decode())
     return dc
 
 
 def decompress(lib, dc, data):
     rc = lib.sbz_dctx_decompress(dc, data, len(data))
+    if rc == SBZ_ERR_BACKEND:
+        raise GpuFault("sbz_dctx_decompress: %s" % lib.sbz_dctx_error(dc).decode())
     if rc == 0:
         return rc, read_buf(lib, dc, "UnCompressedFramesData")
     return rc, b""
@@ -131,6 +144,8 @@ def decompress(lib, dc, data):
 def decompress_frames(lib, dc, data, spans):
     arr = (Span * len(spans))(*[Span(o, s) for o, s in spans])
     rc = lib.sbz_dctx_decompress_frames(dc, data, len(data), arr, len(spans))
+    if rc == SBZ_ERR_BACKEND:
+        raise GpuFault("sbz_dctx_decompress_frames: %s" % lib.sbz_dctx_error(dc).decode())
     if rc == 0:
         return rc, read_buf(lib, dc, "UnCompressedFramesData")
     return rc, b""
@@ -687,10 +702,11 @@ def main():
 
     os.makedirs(BUGS, exist_ok=True)
 
-    # ---- per-entry pass: one fresh context per entry so a crash (a decoder
-    #      bug) is isolated instead of poisoning the rest of the run.  Matrix
-    #      cells are bumped ONLY after a byte-exact decode succeeds. ----
+    # ---- per-entry pass: one fresh context per entry (a GPU fault still stops
+    #      the run, see CURRENT).  Matrix cells are bumped ONLY after a
+    #      byte-exact decode succeeds. ----
     for name, data, expectation in corpus:
+        CURRENT[0] = "%s (per-entry pass)" % name
         total_bytes += len(data)
         kind, value = parse_expectation(expectation)
         try:
@@ -791,6 +807,7 @@ def main():
         dc = make_dctx(lib)
         try:
             for name, data, expectation in corpus:
+                CURRENT[0] = "%s (shared-context pass)" % name
                 if name not in per_entry:
                     continue
                 kind, value = parse_expectation(expectation)
@@ -831,6 +848,7 @@ def main():
 
         # ---- the sbz_dctx_decompress_frames path (one fresh context) ----
         if frame_spans:
+            CURRENT[0] = "the decompress_frames batch"
             dc = make_dctx(lib)
             try:
                 rc, got = decompress_frames(lib, dc,
@@ -976,5 +994,15 @@ def _fmt(v):
     return str(v)
 
 
+def run():
+    try:
+        return main()
+    except GpuFault as e:
+        print("FAIL")
+        print("  GPU fault while decoding %s: %s" % (CURRENT[0], e))
+        print("  (the primary CUDA context is lost; no later entry can run)")
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())
