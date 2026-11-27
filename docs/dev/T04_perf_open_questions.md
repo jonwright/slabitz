@@ -1,6 +1,6 @@
 # T04: Explain the open performance questions
 
-Status: todo
+Status: review
 Executor: Claude
 Depends on: T03
 Branch: `t04-perf-questions`
