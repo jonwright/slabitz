@@ -57,7 +57,8 @@ def main():
         ok &= passed
         print(f"{'PASS' if passed else 'FAIL'}: {name}  gpu={gv}  cpu={cv}")
     print(f"RESULT: {'PASS' if ok else 'FAIL'} (all element-exact)")
-    sys.exit(0 if ok else 1)
+    print("compared %d fields" % (len(checks) if ok else 0))
+    sys.exit(0 if ok and checks else 1)
 
 
 if __name__ == "__main__":

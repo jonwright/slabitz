@@ -16,6 +16,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 from kernels.cpu_ref_bo import ref_compute_dest_block_offsets
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/bo/bo.cubin")
@@ -42,6 +43,7 @@ def run_gpu(drv, fn, block_size_prefix, per_frame_block_count_all, frame_refs,
             Buf(rM.ptr, len(frame_refs)),
             ct.c_uint32(0), ct.c_uint32(work_item_count), ct.c_uint32(frame_count)]
     ngroups = (work_item_count + 127) // 128
+    kparams.check_args("ComputeDestBlockOffsets", args)
     fn(grid=(ngroups, 1, 1), block=(128, 1, 1), args=args)
     drv.synchronize()
     return [x for x in struct.unpack(f"{work_item_count}i", oM.to_host(work_item_count * 4))]
@@ -80,7 +82,8 @@ def main():
         print("   gpu:", gpu)
         print("   cpu:", cpu)
     drv.destroy()
-    sys.exit(0 if not mism else 1)
+    print("compared %d block offsets" % (work_item_count if not mism else 0))
+    sys.exit(0 if not mism and work_item_count > 0 else 1)
 
 
 if __name__ == "__main__":

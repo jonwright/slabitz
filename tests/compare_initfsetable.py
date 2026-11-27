@@ -16,6 +16,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 from kernels.cpu_ref_ifs import ref_initfse_table, MaxCountFseProbs, FseRleTableCount
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/ifs/ifs.cubin")
@@ -63,6 +64,7 @@ def run_gpu(drv, fn, probs, fse_info, table_start_index, group_id,
         ct.c_uint32(table_data_start),
         ct.c_uint32(table_data_count),
     ]
+    kparams.check_args("InitFseTable", args)
     fn(grid=(group_id + 1, 1, 1), block=(128, 1, 1), args=args, shared=3212)
     drv.synchronize()
     return list(struct.unpack(f"{N}i", outM.to_host(N * 4)))
@@ -80,6 +82,7 @@ def main():
         ("C3 negative-freq acc5", 5, 7, [16, 8, 4, -1, -1, -1, -1] + [0] * 57, 1),
     ]
     ok = True
+    total = 0
     for name, acc, pcount, probs, table_type in cases:
         fse_info = ((acc << 8) | pcount) & 0xFFFFFFFF
         table_start_index = 0
@@ -92,6 +95,7 @@ def main():
                                 table_data_start, table_data_count)
         n = table_data_count
         mism = [(j, gpu[j], cpu[j]) for j in range(n) if gpu[j] != cpu[j]]
+        total += n
         status = "PASS" if not mism else "FAIL"
         if mism:
             ok = False
@@ -100,7 +104,8 @@ def main():
             print("   first 10:", mism[:10])
             print("   gpu[:10]:", gpu[:10])
             print("   cpu[:10]:", cpu[:10])
-    sys.exit(0 if ok else 1)
+    print("compared %d table elements" % (total if ok else 0))
+    sys.exit(0 if ok and total > 0 else 1)
 
 
 if __name__ == "__main__":

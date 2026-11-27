@@ -74,7 +74,8 @@ def main():
           f"{len(mism)} mismatch)")
     if mism:
         print("  first mismatches (idx, cpu, oracle):", [(i, lits[i], truth[i]) for i in mism[:15]])
-    sys.exit(0 if ok else 1)
+    print("compared %d bytes" % (len(lits) if ok else 0))
+    sys.exit(0 if ok and len(lits) > 0 else 1)
 
 
 if __name__ == "__main__":

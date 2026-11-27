@@ -16,6 +16,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 from kernels.cpu_ref_initresources import ref_init_resources, _FIELD_ORDER
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/ir/ir.cubin")
@@ -51,13 +52,19 @@ def run_gpu(drv, fn, stage, counters, fse_probs_default, fse_infos, fse_elems, f
             Buf(pM.ptr, len(fse_probs)), Buf(iM.ptr, len(fse_infos)),
             Buf(eM.ptr, len(fse_elems)), ct.c_uint32(stage)]
     ngroups = 1 if stage == 0 else (256 + 31) // 32
+    kparams.check_args("InitResources", args)
     fn(grid=(ngroups, 1, 1), block=(32, 1, 1), args=args)
     drv.synchronize()
     return (to_host(cM, len(counters)), to_host(iM, len(fse_infos)),
             to_host(eM, len(fse_elems)), to_host(pM, len(fse_probs)))
 
 
+compared = 0
+
+
 def check(name, cpu, gpu):
+    global compared
+    compared += len(cpu)
     bad = [(j, gpu[j], cpu[j]) for j in range(len(cpu)) if gpu[j] != cpu[j]]
     print(f"  {name}: {'PASS' if not bad else 'FAIL'} ({len(bad)} mismatch)")
     if bad:
@@ -89,8 +96,9 @@ def main():
         all_ok &= check("fse_probs", p0, pg)
 
     drv.destroy()
+    print("compared %d words" % (compared if all_ok else 0))
     print("OVERALL:", "PASS" if all_ok else "FAIL")
-    sys.exit(0 if all_ok else 1)
+    sys.exit(0 if all_ok and compared > 0 else 1)
 
 
 if __name__ == "__main__":

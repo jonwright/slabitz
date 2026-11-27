@@ -20,10 +20,13 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 from slabitz import zstd_frame, loader
+import kparams  # tests/kparams.py
 from kernels import cpu_ref_pcb, cpu_ref_ifs, cpu_ref_dsq
 from tools.edu_oracle import run_oracle
 
-CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/seq/seq.cubin")
+# DSQ_SEQMS=1: DecompressSequencesMultiStream (seqms cubin, 32 lanes, one more scalar)
+KERNEL = "DecompressSequencesMultiStream" if os.environ.get("DSQ_SEQMS") else "DecompressSequences"
+CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build", kparams.info(KERNEL)["cubin"])
 
 FSE_RLE_TABLE_COUNT = 256
 FSE_MAX_COUNT_PROBS = 64
@@ -59,8 +62,8 @@ def main():
     info = r["fse_info"]
 
     if r["seq_stream_to_ref"] is None:
-        print("no sequence stream; nothing to validate")
-        return 0
+        print("FAIL: no sequence stream; nothing compared")
+        return 1
 
     def build_dtable(name):
         ds_idx = sf[name]
@@ -151,7 +154,7 @@ def main():
         Buf(out_fo1.ptr, 8),
         Buf(out_fo2.ptr, 8),
         Buf(out_fo3.ptr, 8),
-        Buf(counters.ptr, 24),        # inCounters
+        Buf(counters.ptr, 1),         # inCounters (one 88-byte struct)
         Buf(comp_m.ptr, len(data)),   # inCompressedData (ByteAddressBuffer)
         Buf(seq_stream_to_ref.ptr, 1),  # inSeqStreamToRef
         Buf(seq_to_llen.ptr, 1),
@@ -165,8 +168,11 @@ def main():
         ct.c_uint32(0),               # tgOffset
         ct.c_uint32(1),               # workItemCount
     ]
+    if KERNEL == "DecompressSequencesMultiStream":
+        args.append(ct.c_uint32(MAX_SEQ))  # seqCapacity (sequence slots in the outputs)
     print("launching main_0 (grid=1, block=1)...", flush=True)
     disp_block = 32 if os.environ.get("DSQ_SEQMS") else 1
+    kparams.check_args(KERNEL, args)
     fn(grid=(1, 1, 1), block=(disp_block, 1, 1), args=args, shared=0)
     drv.synchronize()
     print("synced", flush=True)
@@ -197,7 +203,8 @@ def main():
     if bs[0] != expect_bs:
         print("  FAIL: blockSizePrefix mismatch")
         ok = False
-    return 0 if ok else 1
+    print("compared %d sequences" % (num_seqs if ok else 0))
+    return 0 if ok and num_seqs > 0 else 1
 
 
 if __name__ == "__main__":

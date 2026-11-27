@@ -18,6 +18,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/ps/ps.cubin")
 BLOCK = 32
@@ -51,6 +52,7 @@ def run_gpu(drv, fn, counts, inclusive):
     daM = dm(drv, [0] * 64)
     args = [Buf(idM.ptr, n), Buf(lkM.ptr, nb), Buf(daM.ptr, 64),
             ct.c_uint32(0), ct.c_uint32(n), ct.c_uint32(inclusive)]
+    kparams.check_args("PrefixSum", args)
     fn(grid=(nb, 1, 1), block=(BLOCK, 1, 1), args=args)
     drv.synchronize()
     return list(struct.unpack(f"{n}I", idM.to_host(n * 4)))
@@ -68,6 +70,7 @@ def main():
             cases.append((f"n={n} inclusive={inclusive}", counts, inclusive))
 
     all_ok = True
+    compared = 0
     for name, counts, inclusive in cases:
         cpu = cpu_ref(counts, inclusive)
         gpu = run_gpu(drv, fn, counts, inclusive)
@@ -76,10 +79,12 @@ def main():
         if bad:
             print("    first few:", bad[:6])
         all_ok &= (not bad)
+        compared += len(cpu)
 
     drv.destroy()
+    print("compared %d prefix values" % (compared if all_ok else 0))
     print("OVERALL:", "PASS" if all_ok else "FAIL")
-    sys.exit(0 if all_ok else 1)
+    sys.exit(0 if all_ok and compared > 0 else 1)
 
 
 if __name__ == "__main__":

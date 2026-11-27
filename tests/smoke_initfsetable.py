@@ -1,4 +1,7 @@
-"""First-launch smoke test for kernels/InitFseTable.slang — pure CUDA (Driver API).
+"""RETIRED (T01): checks only that 64 elements were written; compare_initfsetable.py
+launches the same kernel and compares every table element with kernels/cpu_ref_ifs.py.
+
+First-launch smoke test for kernels/InitFseTable.slang — pure CUDA (Driver API).
 
 No torch / no cudart: device memory is allocated with ``cuMemAlloc`` and copied with
 ``cuMemcpy{DtoH,HtoD}``. This validates the Slang->CUDA integration contract that any
@@ -27,6 +30,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/ifs/ifs.cubin")
 
@@ -80,6 +84,7 @@ def main():
         ct.c_uint32(64),                    # tableDataCount
     ]
 
+    kparams.check_args("InitFseTable", args)
     fn(grid=(1, 1, 1), block=(128, 1, 1), args=args, shared=3212)
     drv.synchronize()
 
