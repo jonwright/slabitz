@@ -117,7 +117,7 @@ diffing one stage against `kernels/cpu_ref_*.py`).
   its numbers, and the reviewer reruns the acceptance and reviewer checks
   before a merge. A check that did not run is "not run", never "pass".
 - Every Python script that launches a kernel directly checks its argument
-  list with `tests/kparams.py` `check_args` (from T01); run `pixi run
+  list with `tests/kparams.py` `check_args` (from T01); run `sbz
   test-kernels` after any kernel signature change. A short `cuLaunchKernel`
   list is not an error at launch: the kernel reads garbage (2026-11-25: six
   scripts were behind for weeks).
