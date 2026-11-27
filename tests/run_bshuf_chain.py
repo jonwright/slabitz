@@ -33,6 +33,18 @@ TIMEOUT = 180
 SBZ_ERR_ARGS, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT = -3, -5, -6
 
 
+def data_required(label):
+    """T02: with SLABITZ_REQUIRE_DATA=1 a missing data file is a failure, not a skip.
+
+    Returns 1 if the requirement was turned into a failure (caller should count it
+    as a bad case), else 0. `label` is the missing file's path."""
+    if os.environ.get("SLABITZ_REQUIRE_DATA") == "1":
+        print("FAIL: data required but %s is missing (set SLABITZ_EXAMPLES)" % label)
+        return 1
+    print("ok   %s: not readable, skipped (set SLABITZ_EXAMPLES)" % label)
+    return 0
+
+
 class Span(ct.Structure):
     _fields_ = [("offs", ct.c_uint64), ("size", ct.c_uint64)]
 
@@ -357,7 +369,7 @@ def main():
         if os.path.exists(path):
             paths.append(path)
         else:
-            print("ok   %s: not readable, skipped (set SLABITZ_EXAMPLES)" % path)
+            bad += data_required(path)  # T02: REQUIRE_DATA turns the skip into a failure
     for path in paths:
         try:
             r = subprocess.run([sys.executable, __file__, "--h5", path, "--frames", "16"],

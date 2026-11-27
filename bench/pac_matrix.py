@@ -116,6 +116,10 @@ def main():
         "mask.h5",
     ]
     if not ex or not all(os.path.isfile(os.path.join(ex, fn)) for fn in needed):
+        if os.environ.get("SLABITZ_REQUIRE_DATA") == "1":
+            missing = [fn for fn in needed if not os.path.isfile(os.path.join(ex, fn))]
+            print("FAIL: data required but missing: %s (set SLABITZ_EXAMPLES)" % ", ".join(missing))
+            return 1
         print("skip pac_matrix: SLABITZ_EXAMPLES missing required files (%s)" % ex)
         return 0
 
@@ -128,6 +132,9 @@ def main():
     if a.codec in ("both", "pac"):
         pac = load_pac(a.pac_lib)
         if pac is None:
+            if os.environ.get("SLABITZ_REQUIRE_DATA") == "1":
+                print("FAIL: data required but libpac.so is missing at %s" % a.pac_lib)
+                return 1
             print("note: libpac.so not found at %s; skipping pac cases" % a.pac_lib)
             if a.codec == "pac":
                 return 0
