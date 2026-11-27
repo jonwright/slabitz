@@ -1,6 +1,6 @@
 # T07: zstd version corpus: bitshuffle 0.4.0's zstd to 1.6.0
 
-Status: in progress
+Status: review (`docs/dev/reports/T07.md`)
 Executor: worker (DeepSeek), reviewed by Claude
 Depends on: T06 (oracle tags and the expectation mechanism)
 Branch: `t07-zstd-versions`
