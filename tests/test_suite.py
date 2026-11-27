@@ -33,7 +33,13 @@ TESTS = ROOT / "tests"
 # (shared GPU); listed so `sbz pytest -m "not slow"` can skip them.
 #   run_chain_stage01  196 s
 #   run_chain_stage2   242 s
-SLOW = frozenset({"run_chain_stage01", "run_chain_stage2"})
+#   run_roundtrip      34 s (T06 soak; maintained here so `-m "not slow"` skips it)
+SLOW = frozenset({"run_chain_stage01", "run_chain_stage2", "run_roundtrip"})
+
+# T06 scripts that are not part of `sbz test` (so sbz.sh has no run_t line for
+# them) but must still be exercised by the pytest entry point.  run_features is
+# in sbz test (parsed from sbz.sh); run_roundtrip is the slow soak.
+EXTRA = [("run_roundtrip", ())]
 
 # CPU-only kernel scripts (no cubin, no CUDA context): the ones T01's report
 # calls CPU-only.  They all appear in run_kernel_scripts.sh with kernel "-".
@@ -132,6 +138,13 @@ def build_specs():
         seen.add(name)
         specs.append(Spec(name, gpu=True, slow=name in SLOW, data_script=False,
                           timeout=SBZ_TEST_TIMEOUT))
+
+    for name, argv in EXTRA:
+        if name in seen:
+            continue
+        seen.add(name)
+        specs.append(Spec(name, gpu=True, slow=name in SLOW, data_script=False,
+                          argv=argv, timeout=SBZ_TEST_TIMEOUT))
 
     for script, kernel, envs in kernel_scripts():
         if is_retired(script):

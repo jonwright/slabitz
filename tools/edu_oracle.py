@@ -8,8 +8,20 @@ is also checked against the expected payload, so a hook can only be trusted if t
 byte-exact.
 
 Hooks so far:
-  HUFW  -- FSE-decoded Huffman weights, one line per FSE-compressed weight sub-block, in decode
-           order (== DecompressHuffmanWeights output; count includes the final symbol).
+  HUFW      -- FSE-decoded Huffman weights, one line per FSE-compressed weight sub-block, in
+               decode order (== DecompressHuffmanWeights output; count includes the final symbol).
+  LITS      -- decoded literal bytes per compressed-literals block.
+  SEQ       -- decoded sequences (literal_length, match_length, coded offset) per compressed block.
+  OFFS      -- resolved real byte offset per sequence (== FinaliseSequenceOffsets output).
+  RAW_HUFW  -- raw direct-nibble Huffman weights (header >= 128); rarely fired by libzstd.
+  LITBLK    -- per compressed block: literals-section type (0 raw, 1 RLE, 2 compressed, 3
+               treeless) and its 2-bit size format. Fires for every literals section.
+  LITSTREAM -- per compressed/treeless literals section: block_type, size_format, stream count.
+               Fires only for compressed/treeless literals (never raw/RLE), so it never emits a
+               payload; distinct from the LITS payload tag.
+  SEQMODES  -- per compressed block with sequences: LL, OF and ML table modes plus seq count.
+  SEQCOUNT  -- per compressed block: the sequence count, including zero (fires for 0-sequence
+               blocks, which skip decompress_sequences and so produce no SEQ/SEQMODES).
 
 Add more hooks (literals, sequences, FSE tables) here as later kernels need them.
 
@@ -66,6 +78,36 @@ HOOKS = [
      '        { fprintf(stderr, "RAW_HUFW %d:", num_symbs);\n'
      '          for (int i_ = 0; i_ < num_symbs; i_++) fprintf(stderr, " %d", weights[i_]);\n'
      '          fprintf(stderr, "\\n"); }\n'),
+    # literals-section type and its 2-bit size format, per compressed block. Fires for every
+    # literals section (raw, RLE, compressed, treeless) because decode_literals() is the single
+    # entry point. block_type: 0=raw, 1=RLE, 2=compressed(HUF table), 3=treeless(reuse table).
+    ("    int block_type = (int)IO_read_bits(in, 2);\n"
+     "    int size_format = (int)IO_read_bits(in, 2);\n",
+     '    { fprintf(stderr, "LITBLK 2: %d %d", block_type, size_format);\n'
+     '      fprintf(stderr, "\\n"); }\n'),
+    # stream count for Huffman-compressed / treeless literals, plus block_type+size_format so a
+    # caller can pair it with the matching LITBLK. Fires only in decode_literals_compressed (so
+    # only for compressed/treeless literals, never raw/RLE). num_streams: 1 when size_format==0,
+    # else 4 (the spec). block_type and size_format are decode_literals_compressed's parameters.
+    ("    if (regenerated_size > MAX_LITERALS_SIZE) {\n"
+     "        CORRUPTION();\n"
+     "    }\n",
+     '    { fprintf(stderr, "LITSTREAM 3: %d %d %d", block_type, size_format, num_streams);\n'
+     '      fprintf(stderr, "\\n"); }\n'),
+    # sequence-section compression modes (LL, OF, ML table modes) plus the sequence count. Fires
+    # once per compressed block that has sequences (decompress_sequences is not reached when there
+    # are none). compression_modes bits: 7-6 LL, 5-4 OF, 3-2 ML.
+    ("    u8 compression_modes = IO_read_bits(in, 8);\n",
+     '    { fprintf(stderr, "SEQMODES 4: %d %d %d %d", (compression_modes >> 6) & 3,\n'
+     '              (compression_modes >> 4) & 3, (compression_modes >> 2) & 3, (int)num_sequences);\n'
+     '      fprintf(stderr, "\\n"); }\n'),
+    # sequence count per compressed block, including zero. decode_sequences returns early on a
+    # zero-sequence block (before decompress_sequences), so SEQMODES/SEQ do not fire for those;
+    # this tag does. num_sequences is the one robust measure of "0-sequence blocks".
+    ("        num_sequences = IO_read_bits(in, 16) + 0x7F00;\n"
+     "    }\n",
+     '    { fprintf(stderr, "SEQCOUNT 1: %u", (unsigned)num_sequences);\n'
+     '      fprintf(stderr, "\\n"); }\n'),
 ]
 
 MAIN_C = r"""

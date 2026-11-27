@@ -248,6 +248,7 @@ cmd_test() {
     cmd_build "$@"
     run_t tests/run_kernel_id.py
     run_t tests/run_host_walk.py
+    run_t tests/run_features.py
     run_t tests/run_chain_stage01.py
     run_t tests/run_chain_stage2.py
     run_t tests/run_chain_frames.py
