@@ -33,6 +33,12 @@ import time
 
 import numpy as np
 
+# Before any CUDA call: with lazy module loading (the CUDA 12 default) the first launch of a
+# kernel in a new context loads it, and the synced profile of a fresh context then shows
+# ParseCompressedBlocks at about 450 us instead of 45 us, in some runs only. Eager loading
+# moves that cost into context creation, outside every measurement.
+os.environ.setdefault("CUDA_MODULE_LOADING", "EAGER")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
@@ -735,6 +741,7 @@ def header(cuda, args):
         frames_per_call=args.frames, warmup=WARMUP, reps=REPS, async_calls=ASYNC_CALLS,
         profile_calls=PROFILE_CALLS, profile_contexts=PROFILE_CTXS, pac=pac_version(),
         selftest=os.environ.get("SLABITZ_GATE_SELFTEST", ""),
+        cuda_module_loading=os.environ.get("CUDA_MODULE_LOADING", ""),
     )
 
 
