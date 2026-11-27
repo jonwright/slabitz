@@ -511,6 +511,9 @@ static int check_idle(sbz_dctx *dc)
     return SBZ_OK;
 }
 
+/* zstd output per call (kzstdgpu_MaxRequestUncompressedByteSize) */
+#define SBZ_MAX_CALL_OUTPUT 0x3FFFFFFFu
+
 static int host_prepare(sbz_dctx *dc, const void *src, size_t srcSize,
                         const sbz_frame_span *spans, uint32_t nspans)
 {
@@ -612,6 +615,13 @@ static int host_prepare(sbz_dctx *dc, const void *src, size_t srcSize,
         ci.frameCount = nspans;
         ci.frameByteCount = bytes;
     }
+    /* The GPU decodes at most kzstdgpu_MaxRequestUncompressedByteSize (0x3FFFFFFF) bytes
+     * per call: block output offsets are prefix-summed with 30-bit lookback values.
+     * Beyond it every frame would get status RequestTooLarge; say so before any GPU
+     * work instead. */
+    if (ci.frameByteCount > SBZ_MAX_CALL_OUTPUT)
+        return fail(dc, SBZ_ERR_LIMIT, "call output %llu bytes exceeds 1 GiB (%u); split the request",
+                    (unsigned long long)ci.frameByteCount, SBZ_MAX_CALL_OUTPUT);
     dc->host_count = ci;
     dc->frame_count = ci.frameCount;
     return SBZ_OK;

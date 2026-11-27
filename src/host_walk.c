@@ -19,8 +19,14 @@
 #define SBZ_MAGIC_SKIP_START 0x184D2A50u
 #define SBZ_MAGIC_SKIP_END 0x184D2A5Fu
 
-/* Largest block size a decodable frame may hold (Block_Maximum_Size, RFC 8878). */
+/* Largest block size a decodable frame may hold (Block_Maximum_Size, RFC 8878):
+ * min(Window_Size, 128 KiB). */
 #define SBZ_BLOCK_MAX_SIZE (128u * 1024u)
+
+/* The GPU packs match offsets in 29 bits (zstdgpu_structs.h,
+ * kzstdgpu_SeqOffset_Encoded_BitBase), so a window of 2^29 bytes or more is not
+ * decodable here (decision 2026-11-25: reject, do not widen the packing). */
+#define SBZ_WINDOW_LOG_MAX 29u
 
 /* The DS kernels keep counts and byte totals in 32 bits; anything that would
  * exceed 0xFFFFFFF0 (leaving headroom) is a SBZ_ERR_LIMIT. */
@@ -150,7 +156,7 @@ static int sbz_ParseFrame(uint32_t frameIndex, sbz_FrameInfo *outFrameInfo, sbz_
                          sbz_walk_error *err) {
     uint32_t pos, descriptor, singleSegmentFlag, dictionaryIdFlag, frameContentSizeFlag;
     uint32_t windowDescriptor = 0, contentCheckSumFlag;
-    uint32_t lastBlock, blockType, blockSize, blockBase, byteCount;
+    uint32_t lastBlock, blockType, blockSize, blockBase, byteCount, blockMax;
     uint64_t windowBase, windowAdd;
     uint64_t rawBytesTotal = 0, rleBytesTotal = 0;
     static const uint8_t dictBytes[4] = { 0u, 1u, 2u, 4u };
@@ -189,10 +195,6 @@ static int sbz_ParseFrame(uint32_t frameIndex, sbz_FrameInfo *outFrameInfo, sbz_
                                "frame %u @ byte %u: dictionary id runs past content", frameIndex,
                                pos);
         outFrameInfo->dictionary = sbz_FFBB_Get(bits, byteCount * 8);
-        if (outFrameInfo->dictionary != 0)
-            return sbz_walk_err(err, SBZ_ERR_CORRUPT,
-                               "frame %u @ byte %u: dictionary id %u not supported", frameIndex,
-                               pos, outFrameInfo->dictionary);
     }
 
     frameContentSizeFlag = sbz_BitFieldExtractU32(descriptor, 6, 2);
@@ -219,6 +221,24 @@ static int sbz_ParseFrame(uint32_t frameIndex, sbz_FrameInfo *outFrameInfo, sbz_
     if (0 != singleSegmentFlag)
         outFrameInfo->windowSize = outFrameInfo->uncompSize;
 
+    /* Frame-level rejects, in the GPU parser's order (zstdgpu_FrameStatusFromHeader):
+     * valid zstd that this decoder does not handle. The GPU keeps its own checks. */
+    if (0 != dictionaryIdFlag)
+        return sbz_walk_err(err, SBZ_ERR_UNSUPPORTED, "frame %u: dictionary (id %u)", frameIndex,
+                           outFrameInfo->dictionary);
+    if (outFrameInfo->windowSize >= (1ull << SBZ_WINDOW_LOG_MAX)) {
+        if (0 == singleSegmentFlag && 0 == (windowDescriptor & 7u))
+            return sbz_walk_err(err, SBZ_ERR_UNSUPPORTED, "frame %u: window 2^%u exceeds 2^%u",
+                               frameIndex, 10u + (windowDescriptor >> 3), SBZ_WINDOW_LOG_MAX);
+        return sbz_walk_err(err, SBZ_ERR_UNSUPPORTED, "frame %u: window %llu bytes exceeds 2^%u",
+                           frameIndex, (unsigned long long)outFrameInfo->windowSize,
+                           SBZ_WINDOW_LOG_MAX);
+    }
+    if (0 == singleSegmentFlag && 0 == frameContentSizeFlag)
+        return sbz_walk_err(err, SBZ_ERR_UNSUPPORTED, "frame %u: no content size", frameIndex);
+    blockMax = (uint32_t)(outFrameInfo->windowSize < SBZ_BLOCK_MAX_SIZE ? outFrameInfo->windowSize
+                                                                        : SBZ_BLOCK_MAX_SIZE);
+
     do {
         pos = sbz_FFBB_Pos(bits);
         if (sbz_FFBB_Available(bits) < 3)
@@ -235,10 +255,12 @@ static int sbz_ParseFrame(uint32_t frameIndex, sbz_FrameInfo *outFrameInfo, sbz_
             return sbz_walk_err(err, SBZ_ERR_CORRUPT,
                                "frame %u @ byte %u: reserved block type 3", frameIndex,
                                blockBase - 3);
-        if (blockSize > SBZ_BLOCK_MAX_SIZE)
+        /* Block_Size (compressed size, raw size, or an RLE block's regenerated
+         * size) is at most Block_Maximum_Size = min(window, 128 KiB) */
+        if (blockSize > blockMax)
             return sbz_walk_err(err, SBZ_ERR_CORRUPT,
-                               "frame %u @ byte %u: block size %u exceeds %u", frameIndex,
-                               blockBase - 3, blockSize, SBZ_BLOCK_MAX_SIZE);
+                               "frame %u @ byte %u: block size %u exceeds the block maximum %u",
+                               frameIndex, blockBase - 3, blockSize, blockMax);
 
         if (2 == blockType) {
             if (0 == blockSize)
