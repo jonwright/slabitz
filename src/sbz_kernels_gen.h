@@ -381,7 +381,7 @@ static const sbz_kinfo sbz_kernel_table[SBZK_COUNT] = {
     { "DecompressSequences", "seq/seq.cubin", "main_0", 1, 20, sbz_kparams_DecompressSequences },
     { "DecompressSequencesMultiStream", "seqms/seqms.cubin", "main_0", 32, 21, sbz_kparams_DecompressSequencesMultiStream },
     { "FinaliseSequenceOffsets", "fso/fso.cubin", "main_0", 256, 13, sbz_kparams_FinaliseSequenceOffsets },
-    { "CheckSequenceOffsets", "cso/cso.cubin", "main_0", 32, 13, sbz_kparams_CheckSequenceOffsets },
+    { "CheckSequenceOffsets", "cso/cso.cubin", "main_0", 256, 13, sbz_kparams_CheckSequenceOffsets },
     { "ExecuteSequences", "exec/exec.cubin", "main_0", 32, 17, sbz_kparams_ExecuteSequences },
     { "BitUnshuffleSlow", "unshuf/unshuf.cubin", "main_0", 256, 7, sbz_kparams_BitUnshuffleSlow },
     { "BitUnshuffleWarp", "unshufw/unshufw.cubin", "main_0", 256, 10, sbz_kparams_BitUnshuffleWarp },
@@ -392,6 +392,6 @@ static const sbz_kinfo sbz_kernel_table[SBZK_COUNT] = {
 
 /* Build ID of the kernel set this library was generated with; a kernel
  * directory must carry the same ID in its sbz_kernels.id file. */
-#define SBZ_KERNELS_ID "43939ae92ad92619"
+#define SBZ_KERNELS_ID "4d6567704fd5ebec"
 
 #endif /* SBZ_KERNELS_GEN_H */
