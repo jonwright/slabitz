@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 from slabitz import zstd_frame, loader
 from kernels import cpu_ref_pcb, cpu_ref_ifs, cpu_ref_dhw, cpu_ref_dl
 from tools.edu_oracle import run_oracle
+import kparams
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/lit/lit.cubin")
 
@@ -98,6 +99,8 @@ def main():
     ctr[9] = len(lit_streams)     # HUF_Streams
     ctr[10] = 1                   # HufLit
     ctr[15] = 1                   # Blocks_CMP
+    ctr[4] = 1                    # DecompressLiteralsGroups (the entry exits for groups past it)
+    ctr[7] = max(do_ + ds for (_, _, do_, ds) in lit_streams)  # HUF_Streams_DecodedBytes (vs litCapacity)
     counters.from_host(struct.pack("%di" % COUNTERS_ELEMS, *ctr))
 
     lit_refs = loader.DeviceMemory(drv, 16 * 8)
@@ -129,17 +132,21 @@ def main():
         Buf(comp_m.ptr, len(data)),    # inCompressedData (ByteAddressBuffer: data, sizeInBytes)
         Buf(hufwid_to_huflitid.ptr, 1),        # inHufWIdToHufLitId
         Buf(huflitid_to_litstream.ptr, 2),     # inHufLitIdToLitStreamId
-        Buf(literals.ptr, MAX_LIT),    # inoutDecompressedLiterals (byte view; count in u32 elems)
-        Buf(literals.ptr, MAX_LIT),    # inoutDecompressedLiterals_Dwords
+        Buf(literals.ptr, MAX_LIT * 4),  # inoutDecompressedLiterals (byte view; count in bytes)
+        Buf(literals.ptr, MAX_LIT),    # inoutDecompressedLiterals_Dwords (u32 view)
         Buf(huf_weights.ptr, 256),     # inDecompressedHuffmanWeights
         Buf(huf_wcount.ptr, 1),        # inDecompressedHuffmanWeightCount
         Buf(dargs.ptr, 16),            # inDispatchArgs
         ct.c_uint32(0),                # tgOffset
         ct.c_uint32(1),                # workItemCount
         ct.c_uint32(32),               # streamsPerGroup
+        ct.c_uint32(MAX_LIT * 4),      # litCapacity (literal bytes the buffer holds)
     ]
+    kparams.check_args("InitHuffmanTableAndDecompressLiterals", args)
     print("launching main_0...", flush=True)
-    fn(grid=(1, 1, 1), block=(32, 1, 1), args=args, shared=1614 * 4)
+    # no dynamic shared memory: the kernel's LDS (1292 dwords) is static, as the
+    # C library launches it (sbz_cuda.c passes 0)
+    fn(grid=(1, 1, 1), block=(32, 1, 1), args=args, shared=0)
     print("launched, synchronizing...", flush=True)
     drv.synchronize()
     print("synced", flush=True)
@@ -160,7 +167,8 @@ def main():
     ok_c = (not mism_c) and len(cpu_lits) == len(truth)
     print(f"{'PASS' if ok_c else 'FAIL'}: CPU lit ref vs oracle ({len(mism_c)} mismatch)")
 
-    sys.exit(0 if (ok_g and ok_c) else 1)
+    print("compared %d bytes" % (len(g_lits) if ok_g else 0))
+    sys.exit(0 if (ok_g and ok_c and len(g_lits) > 0) else 1)
 
 
 if __name__ == "__main__":

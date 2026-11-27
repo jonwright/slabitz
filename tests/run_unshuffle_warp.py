@@ -19,6 +19,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader  # noqa: E402
+import kparams  # tests/kparams.py
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/unshufw/unshufw.cubin")
 
@@ -66,6 +67,7 @@ def case(drv, fn, dtype, nfull, B, in_off, out_off, seed):
             ct.c_uint32(e), ct.c_uint32(B), ct.c_uint32(nfull), ct.c_uint32(0)]
     groups = B // 32
     nslices = (groups + 31) // 32
+    kparams.check_args("BitUnshuffleWarp", args)
     fn(grid=((nfull * nslices + WARPS - 1) // WARPS, 1, 1), block=(WARPS * 32, 1, 1), args=args)
     drv.synchronize()
     got = dOut.to_host(len(outbuf))[out_off:out_off + body]

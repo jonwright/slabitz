@@ -18,6 +18,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 from kernels.cpu_ref_initresources import _FIELD_ORDER
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/cps/cps.cubin")
@@ -68,6 +69,7 @@ def run_gpu(drv, fn, hufw_to_huflit, huflit_to_stream, huf_lit, huf_streams, lit
     args = [Buf(hwM.ptr, n), Buf(hsM.ptr, len(huflit_to_stream)), Buf(outM.ptr, n),
             Buf(lkM.ptr, nb), Buf(cM.ptr, 22), Buf(daM.ptr, 64),
             ct.c_uint32(0), ct.c_uint32(n), ct.c_uint32(literals_per_group)]
+    kparams.check_args("ComputePrefixSum", args)
     fn(grid=(nb, 1, 1), block=(TG, 1, 1), args=args)
     drv.synchronize()
     out = list(struct.unpack(f"{n}I", outM.to_host(n * 4)))
@@ -101,6 +103,7 @@ def main():
         cases.append((f"huf_lit={huf_lit} n={n} lg={lg}", h2l, starts, hl, hs, lg))
 
     all_ok = True
+    compared = 0
     for name, h2l, starts, hl, hs, lg in cases:
         cpu_res, cpu_dlg = cpu_ref(h2l, starts, hl, hs, lg)
         gpu_res, gpu_dlg = run_gpu(drv, fn, h2l, starts, hl, hs, lg)
@@ -111,10 +114,12 @@ def main():
         if bad:
             print("    first few:", bad[:6])
         all_ok &= (not bad and dlg_ok)
+        compared += len(cpu_res)
 
     drv.destroy()
+    print("compared %d prefix values" % (compared if all_ok else 0))
     print("OVERALL:", "PASS" if all_ok else "FAIL")
-    sys.exit(0 if all_ok else 1)
+    sys.exit(0 if all_ok and compared > 0 else 1)
 
 
 if __name__ == "__main__":

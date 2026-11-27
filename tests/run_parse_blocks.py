@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Run the DC ParseCompressedBlocks kernel on a single real compressed block.
+"""RETIRED (T01): dump only, compares nothing; its run() is the launcher that
+compare_parse_blocks.py and compare_parse_blocks_cases.py call and check against
+kernels/cpu_ref_pcb.py, so tests/run_kernel_scripts.sh runs those instead.
+
+Run the DC ParseCompressedBlocks kernel on a single real compressed block.
 
 Pulls a compressed block out of a real zstd frame (zstd_frame), hands it to the GPU
 ParseCompressedBlocks cubin, and dumps the parse outputs (FseInfos, FseProbs,
@@ -19,6 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from slabitz import loader, zstd_frame
+import kparams  # tests/kparams.py
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/pcb/pcb.cubin")
 
@@ -124,6 +129,7 @@ def run(drv, fn, block):
         ct.c_uint32(1),                       # frameCount
         ct.c_uint32(1),                       # compressedBlockCount
     ]
+    kparams.check_args("ParseCompressedBlocks", args)
     fn(grid=(1, 1, 1), block=(32, 1, 1), args=args, shared=0)
     drv.synchronize()
 

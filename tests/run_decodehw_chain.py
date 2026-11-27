@@ -16,6 +16,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 from kernels.cpu_ref_decode_huffman_weights import ref_decode_huffman_weights, MAX_WEIGHTS
 from kernels.cpu_ref_initresources import _FIELD_ORDER
 
@@ -57,6 +58,7 @@ def run_gpu(drv, fn, counters, data_words, huf_refs, weight_count, out_len):
             Buf(dM.ptr, len(data_words)), Buf(rM.ptr, len(huf_refs)),
             Buf(daM.ptr, 64),
             ct.c_uint32(0), ct.c_uint32(len(huf_refs)), ct.c_uint32(len(data_words) * 4)]
+    kparams.check_args("DecodeHuffmanWeights", args)
     fn(grid=(1, 1, 1), block=(32, 1, 1), args=args)
     drv.synchronize()
     return list(oM.to_host(out_len))
@@ -92,7 +94,8 @@ def main():
             print(f"    table{h} cpu:", cpu[base:base + weight_count[h]])
             print(f"    table{h} gpu:", gpu_[base:base + weight_count[h]])
     drv.destroy()
-    sys.exit(0 if not bad else 1)
+    print("compared %d weight slots" % (len(cpu) if not bad else 0))
+    sys.exit(0 if not bad and len(cpu) > 0 else 1)
 
 
 if __name__ == "__main__":

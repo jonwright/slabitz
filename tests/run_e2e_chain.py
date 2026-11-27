@@ -144,7 +144,8 @@ def main():
                 print(f"  first diff at {i}: got={output[i]} want={payload[i]}")
                 break
         print(f"  lens out={len(output)} payload={len(payload)}")
-    return 0 if ok else 1
+    print("compared %d bytes" % (len(output) if ok else 0))
+    return 0 if ok and len(output) > 0 else 1
 
 
 if __name__ == "__main__":

@@ -53,8 +53,8 @@ def main():
     info = r["fse_info"]
 
     if r["seq_stream_to_ref"] is None or sf["LLen"] == 0x3FFFFFFF:
-        print("no sequence stream in block; nothing to validate")
-        return 0
+        print("FAIL: no sequence stream in block; nothing compared")
+        return 1
 
     # Sequence FSE tables: mode may be compressed (probs parsed into r["fse_probs"], accuracy
     # in r["fse_info"]) or predefined (mode-0, DS default distributions at accuracy 6/5/6).
@@ -118,7 +118,8 @@ def main():
     ok = mism == 0 and len(out_llen) == num_seqs
     print(f"{'PASS' if ok else 'FAIL'}: cfg seqs={len(out_llen)} oracle={num_seqs} mismatches={mism}")
     print(f"  LLen={out_llen} MLen={out_mlen} Offs={out_offs} (final offs {fo1:#x},{fo2:#x},{fo3:#x} totalMLen={total_mlen})")
-    return 0 if ok else 1
+    print("compared %d sequences" % (num_seqs if ok else 0))
+    return 0 if ok and num_seqs > 0 else 1
 
 
 if __name__ == "__main__":

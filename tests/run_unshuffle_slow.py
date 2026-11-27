@@ -18,6 +18,7 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader  # noqa: E402
+import kparams  # tests/kparams.py
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/unshuf/unshuf.cubin")
 
@@ -53,6 +54,7 @@ def case(drv, fn, dtype, n, block_bytes, seed):
         # parameter order of kernels/BitUnshuffleSlow.slang
         args = [Buf(dIn.ptr, len(inp)), Buf(dOut.ptr, len(want)), Buf(dTbl.ptr, len(tbl) // 8),
                 ct.c_uint32(e), ct.c_uint32(B), ct.c_uint32(full), ct.c_uint32(0)]
+        kparams.check_args("BitUnshuffleSlow", args)
         fn(grid=(max(1, (full_elems + 255) // 256), 1, 1), block=(256, 1, 1), args=args)
     if last > 0:
         tblog = (full_elems * e).to_bytes(4, "little") * 2
@@ -60,6 +62,7 @@ def case(drv, fn, dtype, n, block_bytes, seed):
         dTbl2.from_host(tblog)
         args2 = [Buf(dIn.ptr, len(inp)), Buf(dOut.ptr, len(want)), Buf(dTbl2.ptr, 1),
                  ct.c_uint32(e), ct.c_uint32(last), ct.c_uint32(1), ct.c_uint32(0)]
+        kparams.check_args("BitUnshuffleSlow", args2)
         fn(grid=(max(1, (last + 255) // 256), 1, 1), block=(256, 1, 1), args=args2)
     drv.synchronize()
     got = dOut.to_host(len(want))

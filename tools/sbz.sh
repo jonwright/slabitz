@@ -9,7 +9,8 @@
 #   sbz build-sm35               sm_35 cubins (NVRTC 11.8) into build/sm_35
 #   sbz build-fatbins            one fatbin per kernel into build/kernels
 #   sbz test                     the main regression tests (each under timeout)
-#   sbz test-kernels | pytest | gate    (added by tasks T01, T02, T03)
+#   sbz test-kernels             every per-kernel script (tests/run_kernel_scripts.sh)
+#   sbz pytest | gate            (added by tasks T02, T03)
 #   sbz where [--kernels DIR]    root, worktree, source key, kernel dirs, data paths
 #   sbz key                      the source key (hash of the kernel sources)
 #
@@ -296,7 +297,7 @@ case "$sub" in
     build-sm35) cmd_build_sm35 ;;
     build-fatbins) cmd_build_fatbins ;;
     test) cmd_test "$@" ;;
-    test-kernels) optional test-kernels tests/run_kernel_args.py "$@" ;;
+    test-kernels) cmd_build; bash tests/run_kernel_scripts.sh ;;  # T01; not part of `test` (slower)
     pytest) require_env; cmd_build; timeout "${SBZ_TEST_TIMEOUT:-3600}" python3 -m pytest tests "$@" ;;
     gate) optional gate bench/gate.py "$@" ;;
     where) cmd_where "$@" ;;

@@ -23,6 +23,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/mmcpy/mmcpy.cubin")
 SENTINEL = 0xEE
@@ -58,6 +59,7 @@ def run_gpu(drv, fn, comp, dest_offs, refs, gidx, flags, out_bytes, nblocks):
         Buf(outM.ptr, padded), Buf(outM.ptr, padded // 4),
         ct.c_uint32(0), ct.c_uint32(flags),
     ]
+    kparams.check_args("MemsetMemcpy", args)
     fn(grid=(nblocks, 1, 1), block=(256, 1, 1), args=args)
     drv.synchronize()
     return outM.to_host(padded)
@@ -118,12 +120,14 @@ def main():
                       [5000, 1023, 1024, 1025, 4099, 17, 131072 + 3], 0, 1))
         cases.append((tag + " one big unaligned", flags, [200001], 0, 3))
     ok = True
+    total = 0
     for name, flags, sizes, gap, start in cases:
         comp, dest, refs, gidx, out_bytes = make_case(rng, flags, sizes, gap_max=gap,
                                                       start=start)
         gpu = run_gpu(drv, fn, comp, dest, refs, gidx, flags, out_bytes, len(sizes))
         cpu, compared = expected(comp, dest, refs, gidx, flags, out_bytes)
         mism = [j for j in range(len(cpu)) if gpu[j] != cpu[j]]
+        total += len(cpu)
         status = "PASS" if not mism and compared > 0 else "FAIL"
         if status == "FAIL":
             ok = False
@@ -133,7 +137,8 @@ def main():
             j = mism[0]
             print("   first mismatches at", mism[:8], "gpu %02x cpu %02x" % (gpu[j], cpu[j]))
     drv.destroy()
-    sys.exit(0 if ok else 1)
+    print("compared %d bytes" % (total if ok else 0))
+    sys.exit(0 if ok and total > 0 else 1)
 
 
 if __name__ == "__main__":

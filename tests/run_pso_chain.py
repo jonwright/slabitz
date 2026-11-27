@@ -17,6 +17,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
+import kparams  # tests/kparams.py
 from kernels.cpu_ref_prefix_seq_offsets import ref_prefix_sequence_offsets, ENC, REP_BASE
 from kernels.cpu_ref_initresources import _FIELD_ORDER
 
@@ -52,6 +53,7 @@ def run_gpu(drv, fn, fin1, fin2, fin3, seq_to_block, per_frame_blocks, per_frame
             Buf(minM.ptr, len(per_frame_min)), Buf(pfbM.ptr, len(per_frame_blocks)),
             Buf(sbM.ptr, n), Buf(cM.ptr, 22), Buf(daM.ptr, 64),
             ct.c_uint32(0), ct.c_uint32(n), ct.c_uint32(frame_count)]
+    kparams.check_args("PrefixSequenceOffsets", args)
     fn(grid=(nb, 1, 1), block=(BLOCK, 1, 1), args=args)
     drv.synchronize()
     return (list(struct.unpack(f"{n}I", f1M.to_host(n * 4))),
@@ -59,7 +61,12 @@ def run_gpu(drv, fn, fin1, fin2, fin3, seq_to_block, per_frame_blocks, per_frame
             list(struct.unpack(f"{n}I", f3M.to_host(n * 4))))
 
 
+compared = 0
+
+
 def check(name, f1, f2, f3, seq_to_block, per_frame_blocks, per_frame_min, frame_count):
+    global compared
+    compared += 3 * len(f1)
     seq_streams = len(f1)
     c1, c2, c3 = list(f1), list(f2), list(f3)
     ref_prefix_sequence_offsets(c1, c2, c3, seq_to_block, per_frame_blocks, per_frame_min, frame_count)
@@ -118,5 +125,6 @@ for name, maker in (("two-frame first-in-frame", case_two_frame), ("three-frame 
     n, sb, pfb, pmin, fc, f1, f2, f3 = maker()
     ok &= check(name, f1, f2, f3, sb, pfb, pmin, fc)
 drv.destroy()
+print("compared %d final offsets" % (compared if ok else 0))
 print("OVERALL:", "PASS" if ok else "FAIL")
-sys.exit(0 if ok else 1)
+sys.exit(0 if ok and compared > 0 else 1)

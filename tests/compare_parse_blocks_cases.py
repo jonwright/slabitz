@@ -82,6 +82,7 @@ def main():
     cases.append(("table", b"".join(b"%5d" % i for i in range(5000)), 4))
 
     total_ok = True
+    compared = 0
     for name, payload, level in cases:
         try:
             block = make_block(payload, level)
@@ -99,10 +100,12 @@ def main():
             total_ok = False
             continue
         total_ok &= ok
+        compared += sum(checks)
         print(f"{'PASS' if ok else 'FAIL'}: {name} level {level}  ({len(block)} b, {sum(checks)}/6 checks)")
 
     print(f"RESULT: {'PASS' if total_ok else 'FAIL'}")
-    sys.exit(0 if total_ok else 1)
+    print("compared %d fields" % (compared if total_ok else 0))
+    sys.exit(0 if total_ok and compared > 0 else 1)
 
 
 if __name__ == "__main__":

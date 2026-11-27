@@ -110,7 +110,8 @@ def main():
                 print(f"  seq {i}: res={resolved[i]} oracle={truth[i]} folded={folded[i]}")
     ok = mism == 0 and len(resolved) == len(truth)
     print(f"{'PASS' if ok else 'FAIL'}: FinaliseSequenceOffsets ({num_seqs} seqs, {mism} mismatch)")
-    return 0 if ok else 1
+    print("compared %d sequence offsets" % (num_seqs if ok else 0))
+    return 0 if ok and num_seqs > 0 else 1
 
 
 if __name__ == "__main__":

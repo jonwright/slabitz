@@ -17,6 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from slabitz import loader
 from kernels.cpu_ref_propagatefse import ref_propagate_fse_index, UNUSED, REPEAT
+import kparams  # tests/, next to this script
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/pfi/pfi.cubin")
 BLOCK = 32
@@ -32,23 +33,39 @@ def dm(drv, src):
     return m
 
 
-def run_gpu(drv, fn, fse_ids):
+SEQ_STREAMS = 8  # index of Seq_Streams in zstdgpu_Counters (kernels/cpu_ref_initresources.py)
+
+
+def run_gpu(drv, fn, fse_ids, device_count=False):
+    """device_count: workItemCount ~0u, the count read from Counters.Seq_Streams (P4 step 2b,
+    as the C library launches it)."""
     n = len(fse_ids)
     nb = (n + BLOCK - 1) // BLOCK
     idM = dm(drv, fse_ids)
     lkM = dm(drv, [0] * nb)
     daM = dm(drv, [0] * 64)  # dispatch args (not read with positive workItemCount)
-    args = [Buf(idM.ptr, n), Buf(lkM.ptr, nb), Buf(daM.ptr, 64),
-            ct.c_uint32(0), ct.c_uint32(n)]
+    ctr = [0] * 22
+    ctr[SEQ_STREAMS] = n
+    cM = dm(drv, ctr)        # one zstdgpu_Counters (22 x u32 = 88 bytes)
+    args = [Buf(idM.ptr, n), Buf(lkM.ptr, nb), Buf(daM.ptr, 64), Buf(cM.ptr, 1),
+            ct.c_uint32(0), ct.c_uint32(0xFFFFFFFF if device_count else n)]
+    kparams.check_args("PropagateFseIndex", args)
     fn(grid=(nb, 1, 1), block=(BLOCK, 1, 1), args=args)
     drv.synchronize()
     return list(struct.unpack(f"{n}I", idM.to_host(n * 4)))
 
 
-def check(name, fse_ids):
+compared = 0
+
+
+def check(name, fse_ids, device_count=False):
+    global compared
     cpu = ref_propagate_fse_index(list(fse_ids), len(fse_ids))
-    gpu = run_gpu(drv, fn, fse_ids)
+    gpu = run_gpu(drv, fn, fse_ids, device_count)
     bad = [(j, gpu[j], cpu[j]) for j in range(len(fse_ids)) if gpu[j] != cpu[j]]
+    compared += len(fse_ids)
+    if device_count:
+        name += " (count from Counters)"
     print(f"  {name}: {'PASS' if not bad else 'FAIL'} ({len(bad)} mismatch)")
     if bad:
         print("    first few:", bad[:6])
@@ -69,8 +86,10 @@ cases = [
 ]
 
 all_ok = True
-for name, ids in cases:
-    all_ok &= check(name, ids)
+for dcount in (False, True):
+    for name, ids in cases:
+        all_ok &= check(name, ids, dcount)
 drv.destroy()
+print("compared %d FSE ids" % (compared if all_ok else 0))
 print("OVERALL:", "PASS" if all_ok else "FAIL")
-sys.exit(0 if all_ok else 1)
+sys.exit(0 if all_ok and compared > 0 else 1)

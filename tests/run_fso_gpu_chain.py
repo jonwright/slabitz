@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 from slabitz import loader
 from tools.edu_oracle import run_oracle
 from run_fso_chain import decode_block, make_payload
+import kparams
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/fso/fso.cubin")
 MAX_SEQ = 20000
@@ -69,7 +70,7 @@ def main():
 
     args = [
         Buf(offs_device.ptr, MAX_SEQ),
-        Buf(counters.ptr, 24),
+        Buf(counters.ptr, 1),                  # inCounters (one 88-byte struct)
         Buf(fso1.ptr, 1),
         Buf(fso2.ptr, 1),
         Buf(fso3.ptr, 1),
@@ -79,8 +80,10 @@ def main():
         Buf(seq_stream_to_block_id.ptr, 1),
         Buf(dispatch_args.ptr, 16),
         ct.c_uint32(0),        # tgOffset
-        ct.c_uint32(1),        # workItemCount
+        ct.c_uint32(num_seqs), # workItemCount (the shader bounds by Seq_Streams_DecodedItems)
+        ct.c_uint32(MAX_SEQ),  # seqCapacity (sequence slots in the offsets buffer)
     ]
+    kparams.check_args("FinaliseSequenceOffsets", args)
 
     import math
     grid = (max(1, (num_seqs + 255) // 256), 1, 1)
@@ -99,7 +102,8 @@ def main():
                 print(f"  seq {i}: gpu={g_offs[i]} oracle={truth[i]}")
     ok = mism == 0 and len(g_offs) == len(truth)
     print(f"{'PASS' if ok else 'FAIL'}: GPU FinaliseSequenceOffsets vs oracle ({num_seqs} seqs, {mism} mismatch)")
-    return 0 if ok else 1
+    print("compared %d sequence offsets" % (num_seqs if ok else 0))
+    return 0 if ok and num_seqs > 0 else 1
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 from slabitz import zstd_frame, loader
+import kparams  # tests/kparams.py
 from kernels import cpu_ref_pcb, cpu_ref_ifs, cpu_ref_dhw
 from tools.edu_oracle import run_oracle
 
@@ -105,6 +106,7 @@ def main():
         Buf(fse_infos.ptr, 512), Buf(fse_elems_m.ptr, 512), Buf(dargs.ptr, 16),
         ct.c_uint32(0), ct.c_uint32(1),   # tgOffset, workItemCount
     ]
+    kparams.check_args("DecompressHuffmanWeights", args)
     fn(grid=(1, 1, 1), block=(8, 1, 1), args=args, shared=0)
     drv.synchronize()
 
@@ -128,7 +130,8 @@ def main():
               f"oracle={len(truth)}, {len(mism)} mismatch)")
         if mism:
             print(f"  first mismatches (idx, {name}, oracle):", [(i, w[i], truth[i]) for i in mism[:10]])
-    sys.exit(0 if ok else 1)
+    print("compared %d weights (GPU)" % (len(g_weights) if ok else 0))
+    sys.exit(0 if ok and len(g_weights) > 0 else 1)
 
 
 if __name__ == "__main__":
