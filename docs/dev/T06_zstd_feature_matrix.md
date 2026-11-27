@@ -1,6 +1,6 @@
 # T06: zstd feature matrix with proof of coverage, and round trips
 
-Status: todo
+Status: review
 Executor: worker (DeepSeek), reviewed by Claude
 Depends on: T02
 Branch: `t06-zstd-features`
