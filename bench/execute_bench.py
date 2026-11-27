@@ -25,6 +25,7 @@ sys.path.insert(0, _REPO)
 sys.path.insert(0, os.path.join(_REPO, "tests"))
 
 from slabitz import zstd_frame, loader
+import kparams  # noqa: E402  (tests/kparams.py)
 from kernels import cpu_ref_pcb, cpu_ref_ifs
 from tools.edu_oracle import run_oracle
 from run_exec_multiblock import decode_block_seqs, global_finalise, Buf, FSE_RLE_TABLE_COUNT
@@ -472,7 +473,7 @@ def run_gpu_bench(frames, N, cubin=CUBIN, warmup=2, reps=5, verify=True, per_fra
         Buf(out_mem.ptr, out_cnt),
         Buf(out_mem.ptr, out_cnt // 4),
         Buf(out_mem.ptr, out_cnt // 16),
-        Buf(ctr_mem.ptr, ctr_cnt),
+        Buf(ctr_mem.ptr, 1),          # inCounters: one 88-byte struct (ctr_cnt is u32 words)
         Buf(pfb_mem.ptr, pfb_cnt),
         Buf(sp_mem.ptr, sp_cnt),
         Buf(do_mem.ptr, do_cnt),
@@ -481,12 +482,13 @@ def run_gpu_bench(frames, N, cubin=CUBIN, warmup=2, reps=5, verify=True, per_fra
         Buf(of_mem.ptr, of_cnt),
         Buf(gi_mem.ptr, gi_cnt),
         Buf(ss_mem.ptr, ss_cnt),
-        Buf(cb_mem.ptr, cb_cnt),
+        Buf(cb_mem.ptr, cb_cnt // 4), # inCompressedBlocks: 16-byte elements (cb_cnt is u32 words)
         ct.c_uint32(lit_cnt),
         ct.c_uint32(g["t_seqs"]),
     ]
 
     def launch():
+        kparams.check_args("ExecuteSequences", args)
         ctx.fn(grid=(grid_x, 1, 1), block=(32, 1, 1), args=args, shared=0)
 
     # ---- verify (byte-exact) ----

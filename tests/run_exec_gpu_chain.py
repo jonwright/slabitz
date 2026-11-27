@@ -24,6 +24,7 @@ from kernels import cpu_ref_pcb, cpu_ref_fso
 from tools.edu_oracle import run_oracle
 from run_fso_chain import decode_block
 from run_e2e_chain import decode_literals, make_payload
+import kparams
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/exec/exec.cubin")
 MAX_SEQ = 20000
@@ -85,8 +86,8 @@ def main():
             m.from_host(struct.pack("%dI" % len(bytes_or_vals), *bytes_or_vals))
         return m
 
-    # padding for the output (multiples of 4 bytes)
-    out_padded = out_size + ((-out_size) % 4)
+    # output padded to 16 bytes: the kernel also takes u32 and uint4 views of it
+    out_padded = out_size + ((-out_size) % 16)
     out_mem = loader.DeviceMemory(drv, out_padded)
     out_mem.from_host(bytes(out_padded))
 
@@ -120,7 +121,9 @@ def main():
         Buf(comp_mem.ptr, len(block_pad)),        # inCompressedData (byte buf; count = bytes)
         Buf(lits_mem.ptr, lits_mem.size),         # inDecompressedLiterals (byte buf; count = bytes)
         Buf(out_mem.ptr, max_bytes),              # inoutUnCompressedFramesData (byte buf; count = bytes)
-        Buf(counters.ptr, 24),
+        Buf(out_mem.ptr, max_bytes // 4),         # inoutUnCompressedFramesData32 (u32 view)
+        Buf(out_mem.ptr, max_bytes // 16),        # inoutUnCompressedFramesData16 (uint4 view)
+        Buf(counters.ptr, 1),                     # inCounters (one 88-byte struct)
         Buf(per_frame_block_count_cmp.ptr, 1),
         Buf(block_size_prefix.ptr, 1),
         Buf(block_dest_offs.ptr, 1),
@@ -130,7 +133,10 @@ def main():
         Buf(global_block_index.ptr, 1),
         Buf(per_seq_stream_seq_start.ptr, 1),
         Buf(compressed_blocks.ptr, 1),
+        ct.c_uint32(lits_mem.size),               # litCapacity (literal bytes)
+        ct.c_uint32(num_seqs),                    # seqCapacity (sequence slots)
     ]
+    kparams.check_args("ExecuteSequences", args)
 
     print("launching exec main_0 (grid=(1,1,1) block=32)...", flush=True)
     fn(grid=(1, 1, 1), block=(32, 1, 1), args=args, shared=0)
@@ -151,7 +157,8 @@ def main():
                 print(f"  first diff at {i}: got={g_out[i]} want={payload[i]}")
                 break
         print(f"  lens out={len(g_out)} payload={len(payload)}")
-    return 0 if ok else 1
+    print("compared %d bytes" % (out_size if ok else 0))
+    return 0 if ok and out_size > 0 else 1
 
 
 if __name__ == "__main__":

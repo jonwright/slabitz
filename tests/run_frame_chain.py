@@ -28,6 +28,7 @@ from slabitz import zstd_frame, loader
 from tools.edu_oracle import run_oracle
 from run_exec_multiblock import (decode_block_seqs, global_finalise, Buf, FSE_RLE_TABLE_COUNT,
                                  cpu_ref_ifs)
+import kparams
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/exec/exec.cubin")
 
@@ -153,6 +154,7 @@ def main():
 
     comp_mem = dev(cmp_data)
     lit_src = literals if literals else b"\x00" * 4
+    lit_bytes = len(lit_src) + ((-len(lit_src)) % 4)
     lit_mem = dev(lit_src + b"\x00" * ((-len(lit_src)) % 4))
 
     # output buffer: host-emit raw/RLE regions, then exec writes CMP regions.
@@ -164,7 +166,7 @@ def main():
                 host_out[do:do + len(b.data)] = b.data
             else:  # rle
                 host_out[do:do + len(b.data)] = b.data * (len(b.data) and 1) or b""
-    out_padded = out_size + ((-out_size) % 4)
+    out_padded = out_size + ((-out_size) % 16)  # also viewed as u32 and uint4
     out_mem = loader.DeviceMemory(drv, out_padded)
     out_mem.from_host(bytes(host_out) + b"\x00" * (out_padded - len(host_out)))
 
@@ -185,8 +187,10 @@ def main():
     args = [
         Buf(comp_mem.ptr, len(cmp_data)),
         Buf(lit_mem.ptr, len(lit_src)),
-        Buf(out_mem.ptr, out_padded),
-        Buf(counters.ptr, 24),
+        Buf(out_mem.ptr, out_padded),             # inoutUnCompressedFramesData (bytes)
+        Buf(out_mem.ptr, out_padded // 4),        # inoutUnCompressedFramesData32 (u32 view)
+        Buf(out_mem.ptr, out_padded // 16),       # inoutUnCompressedFramesData16 (uint4 view)
+        Buf(counters.ptr, 1),                     # inCounters (one 88-byte struct)
         Buf(pfb_cmp.ptr, len(per_frame_block_count_cmp)),
         Buf(size_pref.ptr, nblk),
         Buf(dest_offs_d.ptr, nblk),
@@ -195,8 +199,11 @@ def main():
         Buf(seq_offs.ptr, total_seqs),
         Buf(glob_idx.ptr, ncmp),
         Buf(seq_start.ptr, ncmp),
-        Buf(comp_blk.ptr, ncmp * 4),
+        Buf(comp_blk.ptr, ncmp),                  # inCompressedBlocks (16-byte elements)
+        ct.c_uint32(lit_bytes),                   # litCapacity (literal bytes)
+        ct.c_uint32(total_seqs),                  # seqCapacity (sequence slots)
     ]
+    kparams.check_args("ExecuteSequences", args)
 
     print(f"launching exec over {ncmp} CMP blocks ({nblk} total blocks)...", flush=True)
     fn(grid=(1, 1, 1), block=(32, 1, 1), args=args, shared=0)
@@ -213,7 +220,8 @@ def main():
                 break
         print(f"  g_out[{0}:24]  = {list(g_out[0:24])}")
         print(f"  payload[0:24]= {list(payload[0:24])}")
-    return 0 if ok else 1
+    print("compared %d bytes" % (out_size if ok else 0))
+    return 0 if ok and out_size > 0 else 1
 
 
 if __name__ == "__main__":

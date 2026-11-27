@@ -36,6 +36,7 @@ from kernels.cpu_ref_pcb import _comp_fse_index, FSE_PROB_TABLE_INDEX_REPEAT
 from tools.edu_oracle import run_oracle
 from run_fso_chain import DEF_LLEN, DEF_OFFS, DEF_MLEN, FSE_RLE_TABLE_COUNT, FSE_MAX_COUNT_PROBS
 from run_e2e_chain import decode_literals
+import kparams
 
 CUBIN = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "build/exec/exec.cubin")
 DEF_ACC = {"LLen": 6, "Offs": 5, "MLen": 6}
@@ -258,8 +259,9 @@ def main():
     comp_data = b"".join(b.data for b in cb)
     m, n = dev(comp_data); comp_mem = m; comp_bytes = n
     lit_src = literals if literals else b"\x00" * 4
-    m, n = dev(lit_src + b"\x00" * ((-len(lit_src)) % 4)); lit_mem = m
-    m, n = dev(b"\x00" * (out_size + ((-out_size) % 4))); out_mem = m
+    m, n = dev(lit_src + b"\x00" * ((-len(lit_src)) % 4)); lit_mem = m; lit_bytes = n
+    out_padded = out_size + ((-out_size) % 16)  # also viewed as u32 and uint4
+    m, n = dev(b"\x00" * out_padded); out_mem = m
     m, n = dev([0] * 24); counters = m
     ctr = [0] * 24
     ctr[8] = seq_stream_cnt; ctr[6] = total_seqs; ctr[15] = nblk; ctr[18] = 1
@@ -278,8 +280,10 @@ def main():
     args = [
         Buf(comp_mem.ptr, comp_bytes),
         Buf(lit_mem.ptr, len(literals)),
-        Buf(out_mem.ptr, out_size + ((-out_size) % 4)),
-        Buf(counters.ptr, 24),
+        Buf(out_mem.ptr, out_padded),             # inoutUnCompressedFramesData (bytes)
+        Buf(out_mem.ptr, out_padded // 4),        # inoutUnCompressedFramesData32 (u32 view)
+        Buf(out_mem.ptr, out_padded // 16),       # inoutUnCompressedFramesData16 (uint4 view)
+        Buf(counters.ptr, 1),                     # inCounters (one 88-byte struct)
         Buf(pfb_cmp.ptr, len(per_frame_block_count_cmp)),
         Buf(size_pref.ptr, nblk),
         Buf(dest_offs.ptr, nblk),
@@ -288,14 +292,17 @@ def main():
         Buf(seq_offs.ptr, total_seqs),
         Buf(glob_idx.ptr, nblk),
         Buf(seq_start.ptr, nblk),
-        Buf(comp_blk.ptr, nblk * 4),
+        Buf(comp_blk.ptr, nblk),                  # inCompressedBlocks (16-byte elements)
+        ct.c_uint32(lit_bytes),                   # litCapacity (literal bytes)
+        ct.c_uint32(total_seqs),                  # seqCapacity (sequence slots)
     ]
+    kparams.check_args("ExecuteSequences", args)
 
     print(f"launching exec (grid=(1,1,1) block=32) over {nblk} blocks...", flush=True)
     fn(grid=(1, 1, 1), block=(32, 1, 1), args=args, shared=0)
     drv.synchronize()
 
-    raw = out_mem.to_host(out_size + ((-out_size) % 4))
+    raw = out_mem.to_host(out_padded)
     g_out = bytes(raw[:out_size])
     ok = g_out == payload
     print(f"{'PASS' if ok else 'FAIL'}: GPU multi-block ExecuteSequences == libzstd "
@@ -308,7 +315,8 @@ def main():
             if g_out[i] != payload[i]:
                 print(f"  first diff at {i}: got={g_out[i]} want={payload[i]}")
                 break
-    return 0 if ok else 1
+    print("compared %d bytes" % (out_size if ok else 0))
+    return 0 if ok and out_size > 0 else 1
 
 
 if __name__ == "__main__":
