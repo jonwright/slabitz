@@ -1,6 +1,6 @@
 # T05: Portable kernels and old cards re-check
 
-Status: todo
+Status: in-progress (1050 Ti done; L40S/crunch/960M/Fermi pending)
 Executor: worker for the builds; the user provides access to the cards
 (crunch for sm_35; the machines with the sm_50 960M and the sm_61 1050 Ti)
 Depends on: T01
