@@ -34,12 +34,15 @@ TESTS = ROOT / "tests"
 #   run_chain_stage01  196 s
 #   run_chain_stage2   242 s
 #   run_roundtrip      34 s (T06 soak; maintained here so `-m "not slow"` skips it)
-SLOW = frozenset({"run_chain_stage01", "run_chain_stage2", "run_roundtrip"})
+#   run_gpu_corrupt    ~300 s (T11: at least 2000 corrupt-block inputs, GPU)
+SLOW = frozenset({"run_chain_stage01", "run_chain_stage2", "run_roundtrip",
+                  "run_gpu_corrupt"})
 
-# T06 scripts that are not part of `sbz test` (so sbz.sh has no run_t line for
-# them) but must still be exercised by the pytest entry point.  run_features is
-# in sbz test (parsed from sbz.sh); run_roundtrip is the slow soak.
-EXTRA = [("run_roundtrip", ())]
+# T06/T11 scripts that are not part of `sbz test` (so sbz.sh has no run_t line
+# for them) but must still be exercised by the pytest entry point.  run_features
+# is in sbz test (parsed from sbz.sh); run_roundtrip is the T06 slow soak,
+# run_gpu_corrupt the T11 corrupt-block fuzz.
+EXTRA = [("run_roundtrip", ()), ("run_gpu_corrupt", ())]
 
 # CPU-only kernel scripts (no cubin, no CUDA context): the ones T01's report
 # calls CPU-only.  They all appear in run_kernel_scripts.sh with kernel "-".
