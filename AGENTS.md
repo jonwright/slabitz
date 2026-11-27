@@ -56,12 +56,12 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | Portable kernels (`pixi run -e kepler build-sm35 && pixi run build-fatbins` -> `build/kernels/`) | one fatbin per kernel: sm_35 (NVRTC 11.8), sm_50..sm_90 (nvcc 12.6), compute_90 PTX; 22 files, 5.1 MB. `tests/run_suite_kernel_dir.sh build/kernels` passes on the L40S (same speed as local cubins) and on the TITAN Black under driver 340 |
 | Other Slang targets (compile only, slangc 2026.22) | Last survey at 21 kernels: SPIR-V and HLSL 19/19; Metal 13/19: `WavePrefixCountBits` has no Metal lowering (4 DS kernels: PrefixSum, ComputePrefixSum, ParseCompressedBlocks, InitFseTable) and Metal lacks `GetDimensions` (both unshuffle kernels; pass byte counts as scalars instead). The 2 LZ4 kernels (`Lz4DecodeBlocks`, `Lz4DecodeUnshuffle`) build for SPIR-V and Metal. `BshufWalkChunks` was added later: re-run the survey. `ExecuteSequences` and `InitHuffmanTableAndDecompressLiterals` re-checked for SPIR-V and Metal after tuning |
 | pac-written zstd (local clone of pac-zstd) | done on branch `pac-zstd` (`docs/archive/plan_pac_zstd.md`): verified byte-exact across the 12-case matrix (`bench/pac_matrix.py`: silicon/thaumatin/CeO2 x u16/u32 x mask=0/max-1, 648.9 MB compared) and real zstd files (`tests/run_bshuf_chain.py`). `ExecuteSequences` uses generic `uint4` fills (`off=1`), `uint4`/`uint32` aligned copies (`off=P`), fused short `off=1` fills, and `uint32` literal copies (`maskmax-1` `ExecuteSequences` 3.73x faster on `silicon_u32`); `InitHuffmanTableAndDecompressLiterals` overlaps `GS_PreInit`/`GS_HuffmanTable` (1614 -> 1292 dwords) and uses 1-search table expansion (`Literals` -21% to -24%) |
-| `src/host_walk.c` on corrupt input | bounds-checked: any input -> `SBZ_OK` / `SBZ_ERR_CORRUPT` / `SBZ_ERR_LIMIT` (15 named corrupt cases; ASan/UBSan fuzz, `make build/fuzz_host_walk`, 200k mutants in the test). Compressed-block contents are still trusted by the GPU kernels |
+| `src/host_walk.c` on corrupt input | bounds-checked: any input -> `SBZ_OK` / `SBZ_ERR_CORRUPT` / `SBZ_ERR_LIMIT` / `SBZ_ERR_UNSUPPORTED` (22 named cases, Block_Maximum_Size = min(window, 128 KiB); ASan/UBSan fuzz, `make build/fuzz_host_walk`, 200k mutants in the test). Compressed-block contents are still trusted by the GPU kernels |
 | Python wrapper, packaging | not started (a ctypes loader is in `slabitz/`) |
 | Test harness | `sbz pytest` runs every `sbz test` and `sbz test-kernels` script (generated from the lists; markers `gpu`, `slow`); `SLABITZ_REQUIRE_DATA=1` turns missing data into failures; committed pac fixtures `data/pac` (7 cases, 272 KB) checked by `tests/run_pac_fixtures.py`; `docs/dev/reports/T02.md` |
 | P4 streaming API | async LZ4 + zstd calls, device-input LZ4 (`sbz_dctx_*_async`, `_device`, `sbz_dctx_wait`); zstd device input, public header, per-chunk status: T12, T13 |
-| zstd feature matrix (T06) | `tests/run_features.py` (in `sbz test`): 366 frames (libzstd 1.5.7 plus hand-built RLE literals, RLE and raw blocks), every frame-header, literals and sequence-mode cell covered by a byte-exact decode, 46.6 MB compared per pass, per-entry and shared-context passes; one xfail, a `Dictionary_ID` field of value 0 (T09); `tests/run_roundtrip.py` (slow): 1362 cases, 657 MB; `docs/dev/reports/T06.md` |
-| zstd version coverage (T07) | `tests/run_compat.py` (in `sbz test`, 58 committed entries; `--full` on `data/compat/`, 283 entries, 2.06 GB compared): 9 zstd versions from bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0 plus 4 bitshuffle 0.4.0 chunks; every decode byte-exact, every expected reject (no FCS, window 2^30/2^31, dictionary) returns CORRUPT; `--patch-from` frames fault the GPU on every version (T09); `docs/dev/reports/T07.md` |
+| zstd feature matrix (T06) | `tests/run_features.py` (in `sbz test`): 366 frames (libzstd 1.5.7 plus hand-built RLE literals, RLE and raw blocks), every frame-header, literals and sequence-mode cell covered by a byte-exact decode, 46.6 MB compared per pass, per-entry and shared-context passes; no xfail (the `Dictionary_ID` 0 frame is an expected UNSUPPORTED since T09); `tests/run_roundtrip.py` (slow): 1362 cases, 657 MB; `docs/dev/reports/T06.md` |
+| zstd version coverage (T07) | `tests/run_compat.py` (in `sbz test`, 58 committed entries; `--full` on `data/compat/`, 283 entries, 2.06 GB compared): 9 zstd versions from bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0 plus 4 bitshuffle 0.4.0 chunks; every decode byte-exact, every expected reject (no FCS, window 2^30/2^31, dictionary) returns UNSUPPORTED and `--patch-from` frames CORRUPT (T09); `docs/dev/reports/T07.md` |
 | Per-kernel Python scripts | every launcher calls `tests/kparams.check_args` (signatures parsed from `src/sbz_kernels_gen.h`) before launch; `sbz test-kernels` runs 22 scripts + 8 modes, 30 pass with nonzero compared counts, 2 retired (`run_parse_blocks`, `smoke_initfsetable`); `docs/dev/reports/T01.md` |
 | Performance regression gate | `bench/gate.py`: 164 cells, L40S baseline `bench/baselines/l40s.json` (node frcrg-gpu5l40s-01); `docs/dev/reports/T03.md`: T03 |
 | Open performance questions (T04) | L40S, `docs/dev/reports/T04.md`: pac 0.2.0 frames are 3.5% faster than 0.1 frames on the current kernel (the 1050 Ti "+30% ExecuteSequences" mixed a kernel and a frame change; 1050 Ti recheck in T05); CeO2 zstd time per frame falls with frames per call (1 -> 64: 5-9x), stock LZ4 with host input rises beyond 16 frames (host side, device input does not); fused LZ4 never slower (1.05-2.69x); b840caa made ExecuteSequences 8-19% slower on stock zstd with many plane repeats (wall +5-7%): not the views but per-match code in front of the byte loop in a latency-bound one-wave-per-frame kernel, no fix in the transform keeps the pac gains (T04a), left to T20 |
@@ -198,18 +198,19 @@ must not block the host: caller-owned device (or pinned) input, no mid-call
 readback except exact mode, per-chunk status left on the device, buffers
 reused across calls.
 
-Known limits (2026-11-25 audit; tasks that change them in brackets): frames
-without Frame_Content_Size are rejected [T09 code, T10 support]; windows
->= 2^29 are rejected by the GPU parser only [T09: clean host reject, kept
-as a limit]; host and GPU rejects differ and surface as "block counts GPU !=
-host" [T09]; decoded size is not checked against FCS, so a lying frame can
-overwrite its neighbour [T09]; output per call is capped at 1 GiB by the DS
-request limit [T09]; compressed-block contents are trusted by the kernels
-[T11]; a match offset reaching before the start of its frame (a `--patch-from`
-frame) faults the GPU [T09]; a no-FCS frame in a dctx that decoded a normal
-frame before faults the GPU [T09].
+Known limits (tasks that change them in brackets). Rejected before any GPU
+work with `SBZ_ERR_UNSUPPORTED` (T09): frames without Frame_Content_Size
+[T10 support], a window of 2^29 bytes or more (kept: the GPU packs offsets
+in 29 bits), any Dictionary_ID field (value 0 too). More than 1 GiB of zstd
+output per call returns `SBZ_ERR_LIMIT` (the DS request limit; callers
+split). On the GPU (T09), a frame that decodes past or short of its content
+size, a block over 128 KiB, and a match reaching before its frame's start
+(`--patch-from` frames) set a per-frame status and return `SBZ_ERR_CORRUPT`;
+such blocks are not written, so neighbours stay intact. Other
+compressed-block contents (Huffman, FSE, literals sections) are still
+trusted by the kernels [T11].
 
-Out of scope for v1: dictionaries (rejected), GPU checksum verification
+Out of scope for v1: dictionaries (rejected, UNSUPPORTED), GPU checksum verification
 (checksums are skipped). Compression is planned (T17-T19: LZ4 first, then
 zstd, the subset pac-zstd emits). Vulkan backend later (behind
 `src/sbz_backend.h`).
