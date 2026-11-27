@@ -66,7 +66,16 @@ SBZ_API int sbz_dctx_parse(sbz_dctx *dc, const void *src, size_t srcSize);
  * decompressed output is resident on the device in the "UnCompressedFramesData"
  * buffer. Read it back with sbz_dctx_read_buffer(dc, "UnCompressedFramesData", ...).
  * The total output byte count is in Counters.Frames_UncompressedByteSize (or the sum
- * of the per-frame uncompressed sizes). */
+ * of the per-frame uncompressed sizes).
+ * Errors, all before any GPU work except the last:
+ *   SBZ_ERR_UNSUPPORTED  valid zstd this decoder does not handle: a Dictionary_ID
+ *                        field (any value), a window of 2^29 bytes or more, or no
+ *                        Frame_Content_Size ("frame N: dictionary", "frame N: window
+ *                        2^k exceeds 2^29", "frame N: no content size");
+ *   SBZ_ERR_LIMIT        the frames decode to more than 1 GiB in total (split the
+ *                        call), or another 32-bit limit;
+ *   SBZ_ERR_CORRUPT      malformed headers or block sizes (host walk), or, found on
+ *                        the GPU, a frame whose blocks are corrupt. */
 SBZ_API int sbz_dctx_decompress(sbz_dctx *dc, const void *src, size_t srcSize);
 
 /* One zstd frame inside a caller's buffer: byte offset and size. */
@@ -93,7 +102,8 @@ SBZ_API int sbz_dctx_decompress_frames(sbz_dctx *dc, const void *src, size_t src
  * (S % 8) x elemSize raw, untransposed trailing bytes. SBZ_ERR_CORRUPT on a record
  * outside a chunk, a total not a multiple of elemSize, or a block not a multiple of
  * 8 elements; SBZ_ERR_CORRUPT if a frame's content size differs from its block's
- * elems x elemSize; SBZ_ERR_LIMIT if the total output exceeds 4 GiB. */
+ * elems x elemSize; SBZ_ERR_LIMIT if the zstd frames of the call decode to more
+ * than 1 GiB (0x3FFFFFFF bytes) or the total output exceeds 4 GiB. */
 SBZ_API int sbz_dctx_bshuf_decompress(sbz_dctx *dc, const void *src, size_t srcSize,
                                     const sbz_frame_span *chunks, uint32_t nchunks,
                                     uint32_t elemSize);

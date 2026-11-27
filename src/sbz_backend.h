@@ -39,7 +39,9 @@ enum {
     SBZ_ERR_ARGS = -3,     /* bad API arguments / binding mismatch (a bug) */
     SBZ_ERR_KERNEL = -4,   /* kernel image missing or failed to load */
     SBZ_ERR_CORRUPT = -5,  /* input is not decodable (see per-frame status) */
-    SBZ_ERR_LIMIT = -6     /* input exceeds a 32-bit size limit of the DS kernels */
+    SBZ_ERR_LIMIT = -6,    /* input exceeds a size limit of the DS kernels */
+    SBZ_ERR_UNSUPPORTED = -7 /* valid zstd this decoder does not handle (dictionary,
+                              * window of 2^29 or more, no content size) */
 };
 
 typedef uint64_t sbz_devptr;

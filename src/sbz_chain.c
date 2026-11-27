@@ -511,6 +511,9 @@ static int check_idle(sbz_dctx *dc)
     return SBZ_OK;
 }
 
+/* zstd output per call (kzstdgpu_MaxRequestUncompressedByteSize) */
+#define SBZ_MAX_CALL_OUTPUT 0x3FFFFFFFu
+
 static int host_prepare(sbz_dctx *dc, const void *src, size_t srcSize,
                         const sbz_frame_span *spans, uint32_t nspans)
 {
@@ -612,8 +615,45 @@ static int host_prepare(sbz_dctx *dc, const void *src, size_t srcSize,
         ci.frameCount = nspans;
         ci.frameByteCount = bytes;
     }
+    /* The GPU decodes at most kzstdgpu_MaxRequestUncompressedByteSize (0x3FFFFFFF) bytes
+     * per call: block output offsets are prefix-summed with 30-bit lookback values.
+     * Beyond it every frame would get status RequestTooLarge; say so before any GPU
+     * work instead. */
+    if (ci.frameByteCount > SBZ_MAX_CALL_OUTPUT)
+        return fail(dc, SBZ_ERR_LIMIT, "call output %llu bytes exceeds 1 GiB (%u); split the request",
+                    (unsigned long long)ci.frameByteCount, SBZ_MAX_CALL_OUTPUT);
     dc->host_count = ci;
     dc->frame_count = ci.frameCount;
+    return SBZ_OK;
+}
+
+/* A per-frame GPU status (zstdgpu_shared_structs.h, kzstdgpu_FrameStatus_*, and the
+ * T09 codes added by tools/transform_ds_for_slang.py) as the error message. */
+static int frame_status_fail(sbz_dctx *dc, uint32_t f, uint32_t st)
+{
+    const char *what;
+    switch (st) {
+    case 0xA07A0001u: what = "not a zstd frame (NotZstdFrame)"; break;
+    case 0xA07A0002u: what = "reserved header bit set (ReservedBitSet)"; break;
+    case 0xA07A0003u: what = "dictionary (DictionaryUnsupported)"; break;
+    case 0xA07A0004u: what = "window too large (WindowTooLarge)"; break;
+    case 0xA07A0005u: what = "no content size (MissingContentSize)"; break;
+    case 0xA07A0006u: what = "call output over 1 GiB (RequestTooLarge)"; break;
+    case 0xA07A0007u: what = "decodes past its content size"; break;
+    case 0xA07A0008u: what = "decodes short of its content size"; break;
+    case 0xA07A0009u: what = "a block decodes to more than 128 KiB"; break;
+    case 0xA07A000Au: what = "match offset before frame start"; break;
+    default: what = "corrupt"; break;
+    }
+    return fail(dc, SBZ_ERR_CORRUPT, "frame %u: %s (status 0x%08x)", f, what, st);
+}
+
+static int check_frame_status(sbz_dctx *dc)
+{
+    uint32_t f;
+    for (f = 0; f < dc->frame_count; ++f)
+        if (dc->frame_status[f] != 0)
+            return frame_status_fail(dc, f, dc->frame_status[f]);
     return SBZ_OK;
 }
 
@@ -850,13 +890,7 @@ static int stage1(sbz_dctx *dc)
                                  (size_t)nf * 4u),
            "readback FrameStatus");
     BE_TRY(dc->be->ops->sync(dc->be), "stage 1");
-    {
-        uint32_t f;
-        for (f = 0; f < nf; ++f)
-            if (dc->frame_status[f] != 0)
-                return fail(dc, SBZ_ERR_CORRUPT, "frame %u: status 0x%08x", f,
-                            dc->frame_status[f]);
-    }
+    TRY(check_frame_status(dc));
     dc->stage_done = 1;
     return SBZ_OK;
 }
@@ -1040,6 +1074,15 @@ static int stage2(sbz_dctx *dc)
     }
     if (getenv("SLABITZ_DEBUG_SYNC")) BE_TRY(dc->be->ops->sync(dc->be), "chk:Finalise");
 
+    /* [Check Sequence Offsets] (T09): one wave per compressed block; a match that
+     * reaches before its frame's start marks the block unwritten and sets the frame
+     * status (read after this stage, or at the wait). */
+    {
+        const sbz_scalar s[] = { { "seqCapacity", cntSeq }, { "frameCount", nf } };
+        TRY(launch(dc, SBZK_CheckSequenceOffsets, cmp, NULL, 0, s, NB(s)));
+    }
+    if (getenv("SLABITZ_DEBUG_SYNC")) BE_TRY(dc->be->ops->sync(dc->be), "chk:CheckSeqOffsets");
+
     /* [Memcpy RAW blocks, Memset RLE blocks]: one 256-thread group per block (grid.x =
      * block count; the kernel has no binary search). Bytes are stored through the u8 view
      * at block edges and as words through a second u32 view of the same buffer. */
@@ -1074,9 +1117,15 @@ static int stage2(sbz_dctx *dc)
         dc->stage_done = 2;
         return SBZ_OK;
     }
-    /* [Readback Counters :: After Block Decompression] */
+    /* [Readback Counters :: After Block Decompression], and the per-frame status:
+     * ComputeDestBlockOffsets and CheckSequenceOffsets report frames that do not fit
+     * their content size or reach before their start (T09) */
     TRY(read_counters(dc));
+    BE_TRY(dc->be->ops->download(dc->be, dc->frame_status, dc->buf[B_FrameStatus].ptr,
+                                 (size_t)nf * 4u),
+           "readback FrameStatus");
     BE_TRY(dc->be->ops->sync(dc->be), "stage 2");
+    TRY(check_frame_status(dc));
     /* capacities for the next calls of this context, from what this one needed */
     dc->lit_cap = grow_cap(dc->lit_cap, dc->counters.HUF_Streams_DecodedBytes,
                            DS_MIN_COUNT_UNCOMPRESSED_LIT_BYTES);

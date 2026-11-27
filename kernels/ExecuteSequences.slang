@@ -3,6 +3,8 @@
 // (WaveGetLaneCount()=32) so MAX_COPY_SIZE=32. One threadgroup per frame (groupId = frameIdx),
 // single wave (32 lanes) since WaveGetLaneCount()=32 retires the redundant lanes. Emits literal +
 // match runs into the output using the FinaliseSequenceOffsets-resolved byte offsets.
+// T09: blocks marked kzstdgpu_BlockDestOffs_Invalid (ComputeDestBlockOffsets,
+// CheckSequenceOffsets) are skipped.
 #include "slang_compat.h"
 
 #include "zstdgpu_shaders.h"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One fatbin per kernel, each holding every supported architecture.
 
-For each entry in tools/build_all.py's KERNEL_MAP (22 Slang kernels), bundle into a
+For each entry in tools/build_all.py's KERNEL_MAP (23 Slang kernels), bundle into a
 single `.fatbin` (build/kernels/<sub>/<stem>.fatbin, one CUDA module per file):
 
   - SASS cubins for sm_50 .. sm_90, built by the default environment's nvcc 12.6

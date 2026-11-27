@@ -2,7 +2,8 @@
  *
  * Reads a corpus file of inputs (a sequence of [u32le length][data] records),
  * applies a fixed-seed sequence of mutations, and calls both walk functions on
- * every mutant. A return outside {SBZ_OK, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT} is a bug
+ * every mutant. A return outside {SBZ_OK, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT,
+ * SBZ_ERR_UNSUPPORTED} is a bug
  * and makes the run exit nonzero (as does any sanitizer report). Prints a
  * histogram of the return codes on stdout.
  *
@@ -138,7 +139,7 @@ static int load_corpus(const char *path, Seed **out, int *n_out)
 
 /* ---- walk ---- */
 
-static unsigned long g_ok, g_corrupt, g_limit, g_outset;
+static unsigned long g_ok, g_corrupt, g_limit, g_unsup, g_outset;
 
 static void record(int rc)
 {
@@ -148,6 +149,8 @@ static void record(int rc)
         ++g_corrupt;
     else if (rc == SBZ_ERR_LIMIT)
         ++g_limit;
+    else if (rc == SBZ_ERR_UNSUPPORTED)
+        ++g_unsup;
     else {
         ++g_outset;
         fprintf(stderr, "fuzz: out-of-set return code %d\n", rc);
@@ -352,7 +355,8 @@ int main(int argc, char **argv)
         ++evaluated;
     }
 
-    printf("mutants=%u OK=%lu CORRUPT=%lu LIMIT=%lu\n", evaluated, g_ok, g_corrupt, g_limit);
+    printf("mutants=%u OK=%lu CORRUPT=%lu LIMIT=%lu UNSUPPORTED=%lu\n", evaluated, g_ok,
+           g_corrupt, g_limit, g_unsup);
     free(work);
     free_seeds(seeds, nseeds);
     if (g_outset)

@@ -588,6 +588,55 @@ def patch_execute_sequences_srt(text):
     return text.replace(old, new)
 
 
+# T09: per-frame output bounds. ComputeDestBlockOffsets (Slang entry) marks a block
+# that does not fit its frame with kzstdgpu_BlockDestOffs_Invalid and a frame
+# status; CheckSequenceOffsets (Slang entry) does the same for a block with a match
+# reaching before its frame's start (a `--patch-from` frame, or a corrupt one). The
+# writers (MemsetMemcpy, ExecuteSequences) skip such blocks.
+FRAME_STATUS_ANCHOR = (
+    "static const uint32_t kzstdgpu_MaxRequestUncompressedByteSize    = 0x3FFFFFFFu;\n")
+FRAME_STATUS_ADD = (
+    "\n"
+    "// T09 (slabitz): per-frame output bounds, set in stage 2.\n"
+    "static const uint32_t kzstdgpu_FrameStatus_OutputPastContentSize  = 0xA07A0007u; // a block ends past the frame's content size\n"
+    "static const uint32_t kzstdgpu_FrameStatus_OutputShortOfContentSize = 0xA07A0008u; // the last block ends before the content size\n"
+    "static const uint32_t kzstdgpu_FrameStatus_BlockTooLarge          = 0xA07A0009u; // a block decodes to more than 128 KiB\n"
+    "static const uint32_t kzstdgpu_FrameStatus_OffsetBeforeFrame      = 0xA07A000Au; // a match reaches before the frame start\n"
+    "static const uint32_t kzstdgpu_BlockDestOffs_Invalid              = 0xFFFFFFFFu; // block outside its frame: not written\n"
+)
+
+
+def patch_frame_status_codes(text):
+    n = text.count(FRAME_STATUS_ANCHOR)
+    if n != 1:
+        raise SystemExit("frame status patch: expected 1 match, found %d" % n)
+    return text.replace(FRAME_STATUS_ANCHOR, FRAME_STATUS_ANCHOR + FRAME_STATUS_ADD)
+
+
+EXEC_BOUNDS_PATCHES = [
+    # the entry skips blocks marked invalid by ComputeDestBlockOffsets (outside their
+    # frame) or CheckSequenceOffsets (a match before the frame start). The offset
+    # check itself is a parallel kernel: a per-match test in this serial loop cost
+    # 25% on worst/min_matches (T09 gate, job 38896821).
+    ("        const uint32_t blockByteEnd = blockByteBeg + blockSize;\n",
+     "        const uint32_t blockByteEnd = blockByteBeg + blockSize;\n"
+     "        // T09: this block is not written (its frame has a status)\n"
+     "        ZSTDGPU_BRANCH if (blockByteBeg == kzstdgpu_BlockDestOffs_Invalid)\n"
+     "        {\n"
+     "            continue;\n"
+     "        }\n"),
+]
+
+
+def patch_exec_bounds(text):
+    for idx, (old, new) in enumerate(EXEC_BOUNDS_PATCHES):
+        n = text.count(old)
+        if n != 1:
+            raise SystemExit("EXEC_BOUNDS patch %d: expected 1 match, found %d" % (idx, n))
+        text = text.replace(old, new)
+    return text
+
+
 def strip_dxc_pragmas(text):
     return re.sub(r"^#pragma dxc.*$", "", text, flags=re.M)
 
@@ -736,9 +785,14 @@ def main(argv=None):
             print("  typed byte/halfword buffers as native elements:", rel)
             text = patch_match_copy_swizzle(text)
             print("  patched MATCH_COPY swizzle uniform trip count:", rel)
+            text = patch_exec_bounds(text)
+            print("  patched ExecuteSequences frame bounds (T09):", rel)
         if rel == "zstdgpu_shared_structs.h" or rel.startswith("srt_headers/"):
             text = patch_typed_buffer_types(text)
             print("  typed byte/halfword buffers as native elements:", rel)
+            if rel == "zstdgpu_shared_structs.h":
+                text = patch_frame_status_codes(text)
+                print("  added T09 frame status codes:", rel)
             if rel == "srt_headers/zstdgpu_srt_structs.h":
                 text = patch_execute_sequences_srt(text)
                 print("  added u32/uint4 output views to ExecuteSequences_SRT:", rel)
