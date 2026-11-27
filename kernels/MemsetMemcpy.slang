@@ -46,6 +46,10 @@ void main(StructuredBuffer<zstdgpu_Counters> inCounters,
 
     const zstdgpu_OffsetAndSize blockRef = inBlocksRefs[blockIdx];
     const uint32_t dst = inBlockDestOffs[inGlobalBlockIndex[blockIdx]];
+    if (dst == kzstdgpu_BlockDestOffs_Invalid)
+    {
+        return; // T09: outside its frame (ComputeDestBlockOffsets set the frame status)
+    }
     const uint32_t size = blockRef.size;
     const uint32_t src = blockRef.offs; // RAW: byte offset; RLE: fill byte
 

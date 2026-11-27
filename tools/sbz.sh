@@ -250,6 +250,7 @@ cmd_test() {
     run_t tests/run_host_walk.py
     run_t tests/run_features.py
     run_t tests/run_compat.py
+    run_t tests/run_frame_bounds.py
     run_t tests/run_chain_stage01.py
     run_t tests/run_chain_stage2.py
     run_t tests/run_chain_frames.py

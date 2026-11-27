@@ -585,7 +585,120 @@ def patch_execute_sequences_srt(text):
     n = text.count(old)
     if n != 1:
         raise SystemExit("ExecuteSequences_SRT patch: expected 1 match, found %d" % n)
+    text = text.replace(old, new)
+    # T09: the frame refs (output base per frame) and the per-frame status
+    # (the typedef rewrite has already turned "} zstdgpu_ExecuteSequences_SRT;" into "};")
+    old = ("    ZSTDGPU_RO_BUFFER(zstdgpu_CompressedBlockData)          inCompressedBlocks;\n"
+           "};\n\nstruct zstdgpu_MemsetMemcpy_SRT")
+    new = ("    ZSTDGPU_RO_BUFFER(zstdgpu_CompressedBlockData)          inCompressedBlocks;\n"
+           "    ZSTDGPU_RO_BUFFER(zstdgpu_OffsetAndSize)                inUnCompressedFramesRefs;\n"
+           "    ZSTDGPU_RW_BUFFER(uint32_t)                             inoutFrameStatus;\n"
+           "};\n\nstruct zstdgpu_MemsetMemcpy_SRT")
+    n = text.count(old)
+    if n != 1:
+        raise SystemExit("ExecuteSequences_SRT T09 patch: expected 1 match, found %d" % n)
     return text.replace(old, new)
+
+
+# T09: per-frame output bounds. ComputeDestBlockOffsets (Slang entry) marks a block
+# that does not fit its frame with kzstdgpu_BlockDestOffs_Invalid and a frame
+# status; the writers skip such blocks. ExecuteSequences checks every match offset
+# against the bytes its frame has produced so far (a `--patch-from` frame, or a
+# corrupt one, reaches before the frame start), stops the frame and sets a status.
+FRAME_STATUS_ANCHOR = (
+    "static const uint32_t kzstdgpu_MaxRequestUncompressedByteSize    = 0x3FFFFFFFu;\n")
+FRAME_STATUS_ADD = (
+    "\n"
+    "// T09 (slabitz): per-frame output bounds, set in stage 2.\n"
+    "static const uint32_t kzstdgpu_FrameStatus_OutputPastContentSize  = 0xA07A0007u; // a block ends past the frame's content size\n"
+    "static const uint32_t kzstdgpu_FrameStatus_OutputShortOfContentSize = 0xA07A0008u; // the last block ends before the content size\n"
+    "static const uint32_t kzstdgpu_FrameStatus_BlockTooLarge          = 0xA07A0009u; // a block decodes to more than 128 KiB\n"
+    "static const uint32_t kzstdgpu_FrameStatus_OffsetBeforeFrame      = 0xA07A000Au; // a match reaches before the frame start\n"
+    "static const uint32_t kzstdgpu_BlockDestOffs_Invalid              = 0xFFFFFFFFu; // block outside its frame: not written\n"
+)
+
+
+def patch_frame_status_codes(text):
+    n = text.count(FRAME_STATUS_ANCHOR)
+    if n != 1:
+        raise SystemExit("frame status patch: expected 1 match, found %d" % n)
+    return text.replace(FRAME_STATUS_ANCHOR, FRAME_STATUS_ANCHOR + FRAME_STATUS_ADD)
+
+
+EXEC_BOUNDS_PATCHES = [
+    # ExecuteSequences_Lit returns 1 when a match reaches before the frame start
+    ("static void zstdgpu_ExecuteSequences_Lit(ZSTDGPU_PARAM_INOUT(zstdgpu_ExecuteSequences_SRT) srt,",
+     "static uint32_t zstdgpu_ExecuteSequences_Lit(ZSTDGPU_PARAM_INOUT(zstdgpu_ExecuteSequences_SRT) srt,"),
+    ("                                         uint32_t seqIdx,\n"
+     "                                         uint32_t seqEnd)\n"
+     "{\n"
+     "    ZSTDGPU_BRANCH if (seqIdx < seqEnd)\n",
+     "                                         uint32_t seqIdx,\n"
+     "                                         uint32_t seqEnd,\n"
+     "                                         uint32_t frameBase)\n"
+     "{\n"
+     "    ZSTDGPU_BRANCH if (seqIdx < seqEnd)\n"),
+    ("            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);\n",
+     "            // T09: neither match may reach before the start of the frame\n"
+     "            const uint32_t produced0 = dstOfs + seq.llen - frameBase;\n"
+     "            ZSTDGPU_BRANCH if (seq.offs > produced0 || seq1.offs > produced0 + seq.mlen + seq1.llen)\n"
+     "            {\n"
+     "                return 1u;\n"
+     "            }\n"
+     "            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);\n"),
+    ("            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);\n",
+     "            ZSTDGPU_BRANCH if (seq.offs > dstOfs + seq.llen - frameBase)\n"
+     "            {\n"
+     "                return 1u;\n"
+     "            }\n"
+     "            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);\n"),
+    ("    zstdgpu_MemCpy_DstSrc(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, dstOfs, litBuf, litOfs, litEnd - litOfs, dstEnd);\n"
+     "}\n",
+     "    zstdgpu_MemCpy_DstSrc(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, dstOfs, litBuf, litOfs, litEnd - litOfs, dstEnd);\n"
+     "    return 0u;\n"
+     "}\n"),
+    # the entry: skip blocks marked invalid, pass the frame base, record the status
+    ("        const uint32_t blockByteEnd = blockByteBeg + blockSize;\n",
+     "        const uint32_t blockByteEnd = blockByteBeg + blockSize;\n"
+     "        // T09: ComputeDestBlockOffsets found this block outside its frame\n"
+     "        ZSTDGPU_BRANCH if (blockByteBeg == kzstdgpu_BlockDestOffs_Invalid)\n"
+     "        {\n"
+     "            continue;\n"
+     "        }\n"
+     "        const uint32_t frameBase = srt.inUnCompressedFramesRefs[frameIdx].offs;\n"
+     "        uint32_t badOffset = 0u;\n"),
+    ("            zstdgpu_ExecuteSequences_Lit(srt, srt.inDecompressedLiterals, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd);",
+     "            badOffset = zstdgpu_ExecuteSequences_Lit(srt, srt.inDecompressedLiterals, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd, frameBase);"),
+    ("            zstdgpu_ExecuteSequences_Lit(srt, srt.inCompressedData, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd);",
+     "            badOffset = zstdgpu_ExecuteSequences_Lit(srt, srt.inCompressedData, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd, frameBase);"),
+    ("                zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, seq.llen, blockByteEnd);\n",
+     "                ZSTDGPU_BRANCH if (seq.offs > blockByteCur + seq.llen - frameBase)\n"
+     "                {\n"
+     "                    badOffset = 1u;\n"
+     "                    break;\n"
+     "                }\n"
+     "                zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, seq.llen, blockByteEnd);\n"),
+    ("            zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, litSize - litCur, blockByteEnd);\n"
+     "        }\n"
+     "#endif\n",
+     "            zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, litSize - litCur, blockByteEnd);\n"
+     "        }\n"
+     "#endif\n"
+     "        ZSTDGPU_BRANCH if (badOffset != 0u)\n"
+     "        {\n"
+     "            srt.inoutFrameStatus[frameIdx] = kzstdgpu_FrameStatus_OffsetBeforeFrame;\n"
+     "            return;\n"
+     "        }\n"),
+]
+
+
+def patch_exec_bounds(text):
+    for idx, (old, new) in enumerate(EXEC_BOUNDS_PATCHES):
+        n = text.count(old)
+        if n != 1:
+            raise SystemExit("EXEC_BOUNDS patch %d: expected 1 match, found %d" % (idx, n))
+        text = text.replace(old, new)
+    return text
 
 
 def strip_dxc_pragmas(text):
@@ -736,9 +849,14 @@ def main(argv=None):
             print("  typed byte/halfword buffers as native elements:", rel)
             text = patch_match_copy_swizzle(text)
             print("  patched MATCH_COPY swizzle uniform trip count:", rel)
+            text = patch_exec_bounds(text)
+            print("  patched ExecuteSequences frame bounds (T09):", rel)
         if rel == "zstdgpu_shared_structs.h" or rel.startswith("srt_headers/"):
             text = patch_typed_buffer_types(text)
             print("  typed byte/halfword buffers as native elements:", rel)
+            if rel == "zstdgpu_shared_structs.h":
+                text = patch_frame_status_codes(text)
+                print("  added T09 frame status codes:", rel)
             if rel == "srt_headers/zstdgpu_srt_structs.h":
                 text = patch_execute_sequences_srt(text)
                 print("  added u32/uint4 output views to ExecuteSequences_SRT:", rel)

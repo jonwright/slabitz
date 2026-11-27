@@ -3,6 +3,11 @@
 // find the frame containing blockIdx, then emit the block's absolute destination
 // byte offset = frame base offset + (block offset within the frame). PC/CUDA:
 // numthreads = kzstdgpu_TgSizeX_ComputeDestBlockOffset = 128.
+// T09: the block must lie inside its frame's [base, base + content size), decode to
+// at most 128 KiB, and the frame's last block must end exactly at the content
+// size. Otherwise the block's offset is kzstdgpu_BlockDestOffs_Invalid (no kernel
+// writes it) and the frame gets a status, so a frame that decodes to more than it
+// declared cannot overwrite its neighbour.
 #include "slang_compat.h"
 
 #include "zstdgpu_shaders.h"
@@ -14,6 +19,7 @@ void main(RWStructuredBuffer<uint32_t> inoutBlockDestOffs,
           StructuredBuffer<uint32_t> inBlockSizePrefix,
           StructuredBuffer<uint32_t> inPerFrameBlockCountAll,
           StructuredBuffer<zstdgpu_OffsetAndSize> inUnCompressedFramesRefs,
+          RWStructuredBuffer<uint32_t> inoutFrameStatus,
           uint32_t tgOffset, uint32_t workItemCount, uint32_t frameCount,
           uint2 groupId2 : SV_GroupID, uint32_t threadId : SV_GroupThreadID)
 {
@@ -39,6 +45,32 @@ void main(RWStructuredBuffer<uint32_t> inoutBlockDestOffs,
         blockOffset = inBlockSizePrefix[blockIdx - 1];
     }
 
-    inoutBlockDestOffs[blockIdx] = inUnCompressedFramesRefs[frameIdx].offs +
-                                   blockOffset - firstFrameBlockOffset;
+    const zstdgpu_OffsetAndSize frame = inUnCompressedFramesRefs[frameIdx];
+    // inBlockSizePrefix is inclusive here: this block's decoded size
+    const uint32_t blockSize = inBlockSizePrefix[blockIdx] - blockOffset;
+    const uint32_t nextFrameBlockIdx = (frameIdx + 1u < frameCount)
+                                     ? inPerFrameBlockCountAll[frameIdx + 1u]
+                                     : workItemCount;
+    // 64-bit: corrupt sizes may make the 32-bit prefix wrap
+    const uint64_t inFrameEnd = (uint64_t)(blockOffset - firstFrameBlockOffset) + blockSize;
+    uint32_t status = 0u;
+    if (blockSize > 128u * 1024u)
+    {
+        status = kzstdgpu_FrameStatus_BlockTooLarge;
+    }
+    else if (blockOffset < firstFrameBlockOffset || inFrameEnd > (uint64_t)frame.size)
+    {
+        status = kzstdgpu_FrameStatus_OutputPastContentSize;
+    }
+    else if (blockIdx + 1u == nextFrameBlockIdx && inFrameEnd != (uint64_t)frame.size)
+    {
+        status = kzstdgpu_FrameStatus_OutputShortOfContentSize;
+    }
+    if (status != 0u)
+    {
+        inoutBlockDestOffs[blockIdx] = kzstdgpu_BlockDestOffs_Invalid;
+        inoutFrameStatus[frameIdx] = status;
+        return;
+    }
+    inoutBlockDestOffs[blockIdx] = frame.offs + blockOffset - firstFrameBlockOffset;
 }

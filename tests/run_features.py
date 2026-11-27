@@ -23,11 +23,11 @@ The corpus has two halves:
   RLE literals, a 1-byte FCS, an 8-byte FCS above 2^32 (header only, an
   expected SBZ_ERR_LIMIT reject), and so on.
 
-Entries that today are rejected by design (a frame with no Frame_Content_Size,
-and a frame whose window is 2^29 or more) carry expectation
-"reject:SBZ_ERR_CORRUPT" and fill their matrix cells as "expected reject"
-cells, not coverage failures.  (T09/T10 remove those limits.)  An 8-byte FCS
-above 2^32 is an expected "reject:SBZ_ERR_LIMIT".
+Entries that are rejected by design (a frame with no Frame_Content_Size, a
+frame whose window is 2^29 or more, a frame with a Dictionary_ID field) carry
+expectation "reject:SBZ_ERR_UNSUPPORTED" (T09) and fill their matrix cells as
+"expected reject" cells, not coverage failures.  (T10 removes the no-FCS
+limit.)  An 8-byte FCS above 2^32 is an expected "reject:SBZ_ERR_LIMIT".
 
 If a test unearths a decoder bug, a minimal reproducer is written to
 tests/data/features_bugs/ and the entry is marked "xfail:<reason>" and
@@ -52,7 +52,7 @@ KDIR = os.environ.get("SLABITZ_KERNEL_DIR", os.path.join(ROOT, "build"))
 BUGS = os.path.join(ROOT, "tests", "data", "features_bugs")
 ZSTD_MAGIC = 0xFD2FB528
 SKIP_BASE = 0x184D2A50
-SBZ_ERR_BACKEND, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT = -1, -5, -6
+SBZ_ERR_BACKEND, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT, SBZ_ERR_UNSUPPORTED = -1, -5, -6, -7
 WEIGHT_2_29 = 1 << 29
 LIT_NAME = {0: "raw", 1: "rle", 2: "compressed", 3: "treeless"}
 
@@ -66,8 +66,10 @@ ALLOWED_REJECT_CELLS = {"fcs_size": {0}}
 
 EXPECT_REJECT = {"SBZ_ERR_CORRUPT": SBZ_ERR_CORRUPT,
                  "SBZ_ERR_LIMIT": SBZ_ERR_LIMIT,
+                 "SBZ_ERR_UNSUPPORTED": SBZ_ERR_UNSUPPORTED,
                  "-5": SBZ_ERR_CORRUPT,
-                 "-6": SBZ_ERR_LIMIT}
+                 "-6": SBZ_ERR_LIMIT,
+                 "-7": SBZ_ERR_UNSUPPORTED}
 
 
 def parse_expectation(expectation):
@@ -515,7 +517,8 @@ def make_libzstd_corpus():
             buf = bytearray()
             with co.stream_writer(buf) as w:
                 w.write(data)
-            entries.append(("zstd-%s-streaming" % dname, bytes(buf), "reject:SBZ_ERR_CORRUPT"))
+            entries.append(("zstd-%s-streaming" % dname, bytes(buf),
+                            "reject:SBZ_ERR_UNSUPPORTED"))
         except Exception:
             pass
         # parameters with a big window_log (pushes window >= 2^29)
@@ -613,28 +616,25 @@ def make_handbuilt_corpus():
               + block_header(1, 0, last=True) + b"\x00")
     add("hand-8byte-fcs-limit", big_fr, "reject:SBZ_ERR_LIMIT")
 
-    # ---- window >= 2^29 (expected reject today) ----
+    # ---- window >= 2^29 (UNSUPPORTED: a known limit, T09) ----
     content = b"big window frame " * 30
     bigw = zstd_frame(content, [(0, content)], single=False, fcs_flag=2,
                       window_desc=(19 << 3) | 0)  # exponent 19 -> 2^29
-    add("hand-window-2e29", bigw, "reject:SBZ_ERR_CORRUPT")
+    add("hand-window-2e29", bigw, "reject:SBZ_ERR_UNSUPPORTED")
 
-    # ---- no-FCS frame (non-single, fcs_flag 0) -> expected reject ----
+    # ---- no-FCS frame (non-single, fcs_flag 0) -> UNSUPPORTED until T10 ----
     nf = frame_header(None, single=False, fcs_flag=0, window_desc=0x20) \
         + block_header(5, 0, last=True) + b"hello"
-    add("hand-no-fcs", nf, "reject:SBZ_ERR_CORRUPT")
+    add("hand-no-fcs", nf, "reject:SBZ_ERR_UNSUPPORTED")
 
-    # ---- dictionary-ID field present (value 0).  This is a decoder BUG, not
-    #      out of scope: libzstd decodes it (a Dictionary_ID of 0 needs no
-    #      dictionary), the host walk accepts it, but the GPU parser rejects it
-    #      ("block counts GPU raw/rle/cmp 0/0/0 != host 1/0/0").  Marked xfail
-    #      so it would XPASS once fixed (T09).  Reproducer and README are
-    #      written to tests/data/features_bugs/. ----
+    # ---- dictionary-ID field present (value 0).  libzstd decodes it (a
+    #      Dictionary_ID of 0 needs no dictionary); this decoder rejects any
+    #      Dictionary_ID field before GPU work (T09 design: "frame N:
+    #      dictionary"), as the GPU parser does. ----
     content = b"dict id frame " * 10
     add("hand-dict-id-1",
         zstd_frame(content, [(0, content)], dict_flag=1, dict_val=0),
-        "xfail:GPU ParseFrames rejects a frame with a Dictionary_ID field "
-        "(T09)")
+        "reject:SBZ_ERR_UNSUPPORTED")
 
     # ---- one multi-block frame: raw-literals 0-sequence block + raw blocks
     #      (again raw literals, so the rle-literals cell stays hand-rle-only) ----
@@ -738,7 +738,7 @@ def main():
                 rc, got = decompress(lib, dc, data)
                 if rc != 0:
                     path = reproducer_path(
-                        "did_field" if name == "hand-dict-id-1" else name,
+                        name,
                         data)
                     xfails.append((name, value, path))
                     per_entry[name] = (kind, rc, None)
