@@ -56,19 +56,23 @@ def load_pac(pac_path):
     return pac
 
 
-def encode_stock_zstd(fr, block_bytes):
+def encode_stock(fr, block_bytes, cname, clevel):
+    """One bitshuffle chunk (filter 32008) of the whole array, written by hdf5plugin.
+    block_bytes 0 means the bitshuffle default block (8 kB)."""
     import h5py
     import hdf5plugin
     e = fr.dtype.itemsize
+    kw = dict(nelems=block_bytes // e, cname=cname)
+    if cname == "zstd":
+        kw["clevel"] = clevel
     with h5py.File("mem.h5", "w", driver="core", backing_store=False) as f:
-        ds = f.create_dataset(
-            "d",
-            data=fr,
-            chunks=fr.shape,
-            **hdf5plugin.Bitshuffle(nelems=block_bytes // e, cname="zstd", clevel=2),
-        )
+        ds = f.create_dataset("d", data=fr, chunks=fr.shape, **hdf5plugin.Bitshuffle(**kw))
         _, raw = ds.id.read_direct_chunk((0,) * fr.ndim)
         return bytes(raw)
+
+
+def encode_stock_zstd(fr, block_bytes):
+    return encode_stock(fr, block_bytes, "zstd", 2)
 
 
 def encode_pac_zstd(pac, enc, fr, block_bytes):

@@ -139,6 +139,19 @@ diffing one stage against `kernels/cpu_ref_*.py`).
   GPU makes every number and every ratio meaningless. For a clean GPU, run a
   short Slurm job: `--partition=low-gpu --gres=gpu:nvidia_l40s:1` (example:
   `$SLABITZ_WS/tmp/p3chk/slurm/overlap.sbatch`).
+- Timing: performance claims come from the regression gate, `bench/gate.py`
+  (`sbz gate`), over the whole matrix (164 cells: 5 codecs x 3 datasets x
+  u16/u32 x 2 masks x sync/async/device, plus synthetic twins and worst cases),
+  never from the one case a change targets. `--compare` checks a run against
+  `bench/baselines/<gpu>.json`; `sbatch bench/gate.sbatch` writes the L40S
+  baseline on an idle GPU. Rules:
+  - A PR touching `kernels/`, `src/` or `tools/transform_ds_for_slang.py`
+    includes the `python3 bench/gate.py --compare` table (run through
+    `gpu-run`) in its report.
+  - A PR that makes cells faster refreshes the baseline
+    (`bench/gate.py --write-baseline` in Slurm) in the same commit.
+  - A cell that regresses needs an explicit reason in the report, accepted
+    by the maintainer, and then a refreshed baseline.
 - Timing: ncu does not work on the L40S node (`RmProfilingAdminOnly: 1`); do
   not spend time on environments for it. Use `SLABITZ_PROFILE=1` (CUDA events,
   syncs after every op, so small kernels look slower than they are). LZ4
