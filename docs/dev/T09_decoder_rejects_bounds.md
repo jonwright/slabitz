@@ -1,6 +1,6 @@
 # T09: Decoder: matching rejects, error codes, bounds
 
-Status: todo
+Status: review (`docs/dev/reports/T09.md`)
 Executor: Claude (C runtime and DS transform; not for the worker)
 Depends on: T07 (corpus and expectations to flip), T03 (gate)
 Branch: `t09-rejects-bounds`
