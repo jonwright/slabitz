@@ -56,6 +56,30 @@ SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT = -5, -6
 WEIGHT_2_29 = 1 << 29
 LIT_NAME = {0: "raw", 1: "rle", 2: "compressed", 3: "treeless"}
 
+# Matrix cells that may legitimately be satisfied by a frame the decoder is
+# EXPECTED to reject (reject:<code>).  Today only fcs_size=0 (a frame with no
+# Frame_Content_Size) falls here: the decoder rejects such a frame, so it can
+# never be covered by a byte-exact decode.  T09/T10 remove that limit and then
+# this entry is dropped (the frame becomes a byte-exact decode).  Every other
+# required cell must be covered by a byte-exact decode.
+ALLOWED_REJECT_CELLS = {"fcs_size": {0}}
+
+EXPECT_REJECT = {"SBZ_ERR_CORRUPT": SBZ_ERR_CORRUPT,
+                 "SBZ_ERR_LIMIT": SBZ_ERR_LIMIT,
+                 "-5": SBZ_ERR_CORRUPT,
+                 "-6": SBZ_ERR_LIMIT}
+
+
+def parse_expectation(expectation):
+    """-> ("decode", None) | ("reject", code) | ("xfail", reason)."""
+    if expectation == "decode":
+        return ("decode", None)
+    if expectation.startswith("reject:"):
+        return ("reject", EXPECT_REJECT[expectation.split(":")[1]])
+    if expectation.startswith("xfail:"):
+        return ("xfail", expectation.split(":", 1)[1])
+    raise ValueError("unknown expectation: %r" % expectation)
+
 # --------------------------------------------------------------------------
 # decoder plumbing
 # --------------------------------------------------------------------------
@@ -585,15 +609,17 @@ def make_handbuilt_corpus():
         + block_header(5, 0, last=True) + b"hello"
     add("hand-no-fcs", nf, "reject:SBZ_ERR_CORRUPT")
 
-    # ---- dictionary-ID field present.  Dictionaries are out of scope and the
-    #      decoder rejects a frame that carries a Dictionary_ID (even a value of
-    #      0; the host walker accepts dictionaries with id 0 but the GPU parser
-    #      rejects too, so host/GPU reject differ - a T09 item).  Recorded as a
-    #      reject cell, not a coverage failure. ----
+    # ---- dictionary-ID field present (value 0).  This is a decoder BUG, not
+    #      out of scope: libzstd decodes it (a Dictionary_ID of 0 needs no
+    #      dictionary), the host walk accepts it, but the GPU parser rejects it
+    #      ("block counts GPU raw/rle/cmp 0/0/0 != host 1/0/0").  Marked xfail
+    #      so it would XPASS once fixed (T09).  Reproducer and README are
+    #      written to tests/data/features_bugs/. ----
     content = b"dict id frame " * 10
     add("hand-dict-id-1",
         zstd_frame(content, [(0, content)], dict_flag=1, dict_val=0),
-        "reject:SBZ_ERR_CORRUPT")
+        "xfail:GPU ParseFrames rejects a frame with a Dictionary_ID field "
+        "(T09)")
 
     # ---- one multi-block frame: raw-literals 0-sequence block + raw blocks
     #      (again raw literals, so the rle-literals cell stays hand-rle-only) ----
@@ -635,78 +661,100 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--skip-gpu", action="store_true",
-                    help="only classify, no decode")
+                    help="only classify, no decode (classification-only probe; "
+                         "cannot pass the matrix check because matrix cells are "
+                         "counted only from byte-exact decodes)")
     args = ap.parse_args()
 
     corpus = make_libzstd_corpus() + make_handbuilt_corpus()
 
     lib = load()
-    compared = 0
+    compared_own = 0        # per-entry pass: sbz_dctx_decompress
+    compared_shared = 0     # shared-context pass: sbz_dctx_decompress
+    compared_frames = 0     # sbz_dctx_decompress_frames batch
     unexpected = 0
     failures = []
-    xfails = []
+    xfails = []             # (name, reason, reproducer_path)
     total_bytes = 0
 
-    aggregate = {}
-    frame_spans = []       # for the _frames path
+    aggregate = {}          # cells covered by a byte-exact decode
+    reject_agg = {}         # cells seen in expected-reject entries
+    per_entry = {}          # name -> (kind, rc, want_or_None)
+    frame_spans = []        # for the _frames path
     frame_bytes_concat = bytearray()
     libzstd_expected_concat = bytearray()
     base = 0
 
-    bug_dir = os.makedirs(BUGS, exist_ok=True) or BUGS
+    os.makedirs(BUGS, exist_ok=True)
 
+    # ---- per-entry pass: one fresh context per entry so a crash (a decoder
+    #      bug) is isolated instead of poisoning the rest of the run.  Matrix
+    #      cells are bumped ONLY after a byte-exact decode succeeds. ----
     for name, data, expectation in corpus:
         total_bytes += len(data)
-        expect_code = None
-        if expectation.startswith("reject:"):
-            expect_code = {"SBZ_ERR_CORRUPT": SBZ_ERR_CORRUPT,
-                           "SBZ_ERR_LIMIT": SBZ_ERR_LIMIT,
-                           "-5": SBZ_ERR_CORRUPT,
-                           "-6": SBZ_ERR_LIMIT}[expectation.split(":")[1]]
+        kind, value = parse_expectation(expectation)
         try:
             frames, counts = classify_entry(data)
         except Exception as e:
             failures.append("%s: classify failed: %s" % (name, e))
             continue
 
-        # aggregate feature counts
-        for axis, vals in counts.items():
-            for val in vals:
-                _bump(aggregate, axis, val)
-
-        # decode.  A fresh context per entry so that an entry that crashes the
-        # GPU (a decoder bug) does not poison the loop: it is recorded as an
-        # xfail and the next entry starts from a clean context.
         if args.skip_gpu:
             continue
+
         dc = make_dctx(lib)
         try:
-            rc, got = decompress(lib, dc, data)
-
-            # expected/actual comparison
-            if expect_code is not None:
-                if rc != expect_code:
+            if kind == "reject":
+                rc, _ = decompress(lib, dc, data)
+                if rc != value:
                     unexpected += 1
                     failures.append(
                         "%s: expected reject:%d got rc=%d (%s)"
-                        % (name, expect_code, rc, lib.sbz_dctx_error(dc).decode()))
+                        % (name, value, rc, lib.sbz_dctx_error(dc).decode()))
+                else:
+                    for axis, vals in counts.items():
+                        for val in vals:
+                            _bump(reject_agg, axis, val)
+                    per_entry[name] = (kind, rc, None)
                 continue
-            # expectation == decode
+
+            if kind == "xfail":
+                rc, got = decompress(lib, dc, data)
+                if rc != 0:
+                    path = reproducer_path(
+                        "did_field" if name == "hand-dict-id-1" else name,
+                        data)
+                    xfails.append((name, value, path))
+                    per_entry[name] = (kind, rc, None)
+                else:
+                    want = _zstd_decompress(data)
+                    if want is None or got[:len(want)] != want:
+                        unexpected += 1
+                        failures.append(
+                            "%s: xfail decoded but output mismatch vs libzstd"
+                            % name)
+                    else:
+                        unexpected += 1
+                        failures.append(
+                            "%s: XPASS (xfail decoded byte-exact; the target "
+                            "bug is fixed - update the expectation)" % name)
+                    per_entry[name] = ("xpass", 0, want)
+                continue
+
+            # kind == "decode": must be byte-exact.
+            rc, got = decompress(lib, dc, data)
+            want = _zstd_decompress(data)
             if rc != 0:
-                # a decoder bug, unless it is an accepted limit
-                if rc in (SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT):
-                    write_bug(name, data, rc, lib.sbz_dctx_error(dc).decode())
-                    xfails.append((name, rc, lib.sbz_dctx_error(dc).decode()))
-                    continue
                 unexpected += 1
                 failures.append("%s: decode rc=%d (%s)"
                                 % (name, rc, lib.sbz_dctx_error(dc).decode()))
+                per_entry[name] = (kind, rc, None)
                 continue
-            want = _zstd_decompress(data)
             if want is None:
                 unexpected += 1
                 failures.append("%s: zstandard could not decode a valid frame"
                                 % name)
+                per_entry[name] = (kind, rc, None)
                 continue
             got = got[:len(want)]
             if got != want:
@@ -716,12 +764,17 @@ def main():
                 failures.append(
                     "%s: byte mismatch at %d (got %d want %d bytes)"
                     % (name, i, len(got), len(want)))
+                per_entry[name] = (kind, rc, None)
                 continue
-            compared += len(want)
 
-            # accumulate a concatenated batch for the _frames path.  Only single
-            # non-skippable frames keep the accounting simple (want == that
-            # frame's output).
+            # byte-exact: now the entry's features count toward the matrix.
+            for axis, vals in counts.items():
+                for val in vals:
+                    _bump(aggregate, axis, val)
+            compared_own += len(want)
+            per_entry[name] = (kind, 0, want)
+
+            # accumulate a single zstd frame into the _frames batch.
             if len(frames) == 1 and frames[0][0] == "z":
                 frame_bytes = frames[0][1]
                 frame_bytes_concat += frame_bytes
@@ -731,45 +784,102 @@ def main():
         finally:
             lib.sbz_dctx_destroy(dc)
 
-    # ---- the sbz_dctx_decompress_frames path ----
-    if not args.skip_gpu and frame_spans:
+    # ---- shared-context pass: ONE dctx reused across the whole corpus (the
+    #      realistic use).  Any result that differs from the per-entry pass is
+    #      an unexpected result naming the entry. ----
+    if not args.skip_gpu:
         dc = make_dctx(lib)
         try:
-            rc, got = decompress_frames(lib, dc, bytes(frame_bytes_concat),
-                                        frame_spans)
-            want_concat = bytes(libzstd_expected_concat)
-            if rc == 0 and got[:len(want_concat)] == want_concat:
-                compared += len(want_concat)
-            else:
-                unexpected += 1
-                failures.append(
-                    "decompress_frames batch: rc=%d got %d want %d bytes"
-                    % (rc, len(got), len(want_concat)))
+            for name, data, expectation in corpus:
+                if name not in per_entry:
+                    continue
+                kind, value = parse_expectation(expectation)
+                p_kind, p_rc, p_want = per_entry[name]
+                if kind == "reject":
+                    rc, _ = decompress(lib, dc, data)
+                    if rc != value:
+                        unexpected += 1
+                        failures.append(
+                            "shared pass %s: expected reject:%d got rc=%d"
+                            % (name, value, rc))
+                    continue
+                if kind == "xfail":
+                    rc, _ = decompress(lib, dc, data)
+                    if rc != p_rc:
+                        unexpected += 1
+                        failures.append(
+                            "shared pass %s: rc=%d differs from per-entry "
+                            "rc=%d (xfail)" % (name, rc, p_rc))
+                    continue
+                # decode
+                rc, got = decompress(lib, dc, data)
+                if rc != 0:
+                    unexpected += 1
+                    failures.append(
+                        "shared pass %s: decode rc=%d differs from per-entry"
+                        % (name, rc))
+                    continue
+                if p_want is not None and got[:len(p_want)] != p_want:
+                    unexpected += 1
+                    failures.append(
+                        "shared pass %s: output differs from per-entry"
+                        % name)
+                    continue
+                compared_shared += len(p_want) if p_want is not None else 0
         finally:
             lib.sbz_dctx_destroy(dc)
 
-    print_matrix(aggregate)
-    print()
-    print("entries=%d  compressed_bytes=%d  compared_bytes=%d  unexpected=%d"
-          % (len(corpus), total_bytes, compared, unexpected))
+        # ---- the sbz_dctx_decompress_frames path (one fresh context) ----
+        if frame_spans:
+            dc = make_dctx(lib)
+            try:
+                rc, got = decompress_frames(lib, dc,
+                                            bytes(frame_bytes_concat),
+                                            frame_spans)
+                want_concat = bytes(libzstd_expected_concat)
+                if rc == 0 and got[:len(want_concat)] == want_concat:
+                    compared_frames += len(want_concat)
+                else:
+                    unexpected += 1
+                    failures.append(
+                        "decompress_frames batch: rc=%d got %d want %d bytes"
+                        % (rc, len(got), len(want_concat)))
+            finally:
+                lib.sbz_dctx_destroy(dc)
 
-    # ---- validate the matrix ----
+    print_matrix(aggregate, reject_agg)
+    print()
+    print("entries=%d  compressed_bytes=%d" % (len(corpus), total_bytes))
+    print("per-entry pass: compared_bytes=%d" % compared_own)
+    print("shared-context pass: compared_bytes=%d" % compared_shared)
+    print("decompress_frames batch: compared_bytes=%d" % compared_frames)
+    print("unexpected=%d" % unexpected)
+    print("xfails=%d  XPASSes=%d"
+          % (sum(1 for _ in xfails),
+             sum(1 for n in per_entry if per_entry[n][0] == "xpass")))
+
+    # ---- validate the matrix (only byte-exact decodes + allowed rejects) ----
     req = required_cells()
     empty = []
     for axis, values in req.items():
-        cell = aggregate.get(axis, {})
+        allowed = ALLOWED_REJECT_CELLS.get(axis, set())
         for v in values:
-            if cell.get(v, 0) < 1:
-                empty.append("%s=%r" % (axis, v))
+            if aggregate.get(axis, {}).get(v, 0) >= 1:
+                continue
+            if v in allowed and reject_agg.get(axis, {}).get(v, 0) >= 1:
+                continue
+            empty.append("%s=%r" % (axis, v))
     if empty:
-        failures.append("empty matrix cells (need >= 1 each): " + ", ".join(empty))
+        failures.append("empty matrix cells (need >= 1 byte-exact decode, or "
+                        "an allowed expected-reject): "
+                        + ", ".join(empty))
 
-    for name, rc, msg in xfails:
-        print("xfail  %s (rc=%d: %s) -> reproducer in tests/data/features_bugs/"
-              % (name, rc, msg))
+    for name, reason, path in xfails:
+        print("xfail  %s: %s" % (name, reason))
+        print("       reproducer: %s" % path)
 
     print()
-    if compared == 0:
+    if (compared_own == 0 and compared_shared == 0 and compared_frames == 0):
         failures.append("no bytes compared")
     if failures:
         print("FAIL")
@@ -802,17 +912,19 @@ def strip_skippable(buf):
     return b""
 
 
-def write_bug(name, data, rc, msg):
+def reproducer_path(name, data):
+    """Write a minimal reproducer for an xfail and return its path."""
+    fn = os.path.join(BUGS, name.replace("/", "_") + ".zst")
     try:
         os.makedirs(BUGS, exist_ok=True)
-        fn = os.path.join(BUGS, name.replace("/", "_") + ".zst")
         with open(fn, "wb") as f:
             f.write(data)
     except OSError:
         pass
+    return fn
 
 
-def print_matrix(agg):
+def print_matrix(agg, reject_agg):
     def show(axis, names):
         cell = agg.get(axis, {})
         vals = []
@@ -820,7 +932,15 @@ def print_matrix(agg):
             vals.append("%s=%d" % (_fmt(v), cell.get(v, 0)))
         print("  %-18s %s" % (axis, "  ".join(vals)))
 
-    print("zstd feature matrix (each cell count must be >= 1):")
+    def show_reject(axis, names):
+        cell = reject_agg.get(axis, {})
+        vals = []
+        for v in names:
+            vals.append("%s=%d" % (_fmt(v), cell.get(v, 0)))
+        print("  %-18s %s" % (axis, "  ".join(vals)))
+
+    print("zstd feature matrix (each cell count must be >= 1, counted only "
+          "from byte-exact decodes):")
     show("literals", ["raw", "rle", "compressed", "treeless"])
     show("literals_stream", [("compressed", 1), ("compressed", 4),
                             ("treeless", 1), ("treeless", 4)])
@@ -841,6 +961,13 @@ def print_matrix(agg):
     cell = agg.get("window_ge_2_29", {})
     print("  %-18s window>=2^29=%d (expected reject)"
           % ("(info)", cell.get(True, 0)))
+
+    print("  (expected reject) cells seen in expected-reject entries "
+          "(only these, and only fcs_size=0, may satisfy the matrix):")
+    show_reject("fcs_size", [0, 1, 2, 4, 8])
+    show_reject("single_segment", ["on", "off"])
+    show_reject("dict_size", [0, 1, 2, 4])
+    show_reject("window_ge_2_29", [True])
 
 
 def _fmt(v):
