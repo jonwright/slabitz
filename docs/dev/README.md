@@ -23,7 +23,7 @@ correctness (T06-T11), API (T12-T16), performance (T20-T21) and encoder
 | T00 | [Synthetic test data matched to real data, plus worst cases](T00_synthetic_data.md) | Claude (models) + worker | T-1 | done (9088d09) |
 | T01 | [Kernel argument checks for every Python launcher](T01_kernel_arg_checks.md) | Claude | T-1 | done (e5e8271) |
 | T02 | [Test harness: pytest entry, required data, pac fixtures](T02_test_harness.md) | worker | T01, T00 | review |
-| T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01, T00 | todo |
+| T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01, T00 | review |
 | T04 | [Explain the open performance questions](T04_perf_open_questions.md) | Claude | T03 | todo |
 | T05 | [Portable kernels and old cards re-check](T05_old_cards.md) | worker + user (hardware) | T01 | todo |
 | T06 | [zstd feature matrix with proof of coverage, round trips](T06_zstd_feature_matrix.md) | worker | T02 | todo |
@@ -111,8 +111,10 @@ The reviewer may have no memory of the task. Do not trust the report: rerun.
    the tests can detect a fault. Revert each one afterwards.
 4. **Full suite.** Run `CUDA_ARCH=sm_89 sbz test`. Once T01 is merged,
    also run `sbz test-kernels`. Once T03 is merged, and the task touches
-   `kernels/`, `src/` or `tools/transform_ds_for_slang.py`, also run
-   `python3 bench/gate.py --compare`.
+   `kernels/`, `src/` or `tools/transform_ds_for_slang.py`, also run the
+   gate on the baseline's node: `sbatch -w $(SLABITZ_GATE_GPU=l40s python3
+   bench/gate.py --baseline-node) bench/gate.sbatch --compare` (log in
+   `$SLABITZ_DEV_ROOT/results/gate-<job>.out`).
 5. **Worker drafts.** If the worker drafted the change, the commit message
    says so.
 6. **After merging.** Set Status to `done (<merge commit>)`, add an entry to

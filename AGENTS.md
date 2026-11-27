@@ -61,7 +61,7 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | P4 streaming API | async LZ4 + zstd calls, device-input LZ4 (`sbz_dctx_*_async`, `_device`, `sbz_dctx_wait`); zstd device input, public header, per-chunk status: T12, T13 |
 | zstd version coverage | corpus from libzstd 1.5.7 only; target bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0: T06, T07, T09, T10 |
 | Per-kernel Python scripts | every launcher calls `tests/kparams.check_args` (signatures parsed from `src/sbz_kernels_gen.h`) before launch; `sbz test-kernels` runs 22 scripts + 8 modes, 30 pass with nonzero compared counts, 2 retired (`run_parse_blocks`, `smoke_initfsetable`); `docs/dev/reports/T01.md` |
-| Performance regression gate | none: numbers live in prose, no stored baseline: T03 |
+| Performance regression gate | `bench/gate.py`: 164 cells, L40S baseline `bench/baselines/l40s.json` (node frcrg-gpu5l40s-01); `docs/dev/reports/T03.md`: T03 |
 | Compression | not started; LZ4 then zstd: T17-T19 |
 | Agent environment | shared root `$SLABITZ_DEV_ROOT`: one env, shared data and kernel cache, one worktree per task (`dev-root`, `sbz`, `gpu-run`); `AGENT_START.md`, `docs/dev/reports/T-1.md` |
 | Synthetic data | fitted generator `tools/synth` (version 2), twins of the 8 real files, 36 extensions, 24 worst cases in `data/synth/current` (= `v2`); compare 250 of 256 checks pass (6 misses, all accepted by the maintainer: al2o3 x3 as known; hplc class 2-3 and eiger4m_u32 zstd 3 byte split as near enough), GPU decode time of 5 twin/real pairs within 5%; `docs/dev/reports/T00.md` |
@@ -144,10 +144,13 @@ diffing one stage against `kernels/cpu_ref_*.py`).
   u16/u32 x 2 masks x sync/async/device, plus synthetic twins and worst cases),
   never from the one case a change targets. `--compare` checks a run against
   `bench/baselines/<gpu>.json`; `sbatch bench/gate.sbatch` writes the L40S
-  baseline on an idle GPU. Rules:
+  baseline on an idle GPU. L40S nodes differ by up to 16% in many cells, so
+  a compare runs on the baseline's node (the gate refuses another node unless
+  `--any-node`). Rules:
   - A PR touching `kernels/`, `src/` or `tools/transform_ds_for_slang.py`
-    includes the `python3 bench/gate.py --compare` table (run through
-    `gpu-run`) in its report.
+    includes the `--compare` table in its report, from
+    `sbatch -w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node)
+    bench/gate.sbatch --compare`.
   - A PR that makes cells faster refreshes the baseline
     (`bench/gate.py --write-baseline` in Slurm) in the same commit.
   - A cell that regresses needs an explicit reason in the report, accepted
