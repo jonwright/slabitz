@@ -135,6 +135,9 @@ def main():
     for name in ("silicon_lz4.h5", "ceo2_lz4.h5"):
         path = os.path.join(examples, name)
         if not os.path.exists(path):
+            if os.environ.get("SLABITZ_REQUIRE_DATA") == "1":  # T02
+                print("FAIL: data required but %s is missing (set SLABITZ_EXAMPLES)" % path)
+                sys.exit(1)
             print("ok   %s: not readable, skipped (set SLABITZ_EXAMPLES)" % path)
             continue
         import h5py

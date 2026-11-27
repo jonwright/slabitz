@@ -173,7 +173,7 @@ def parse_chunk_blocks(chunk, e):
     return blocks
 
 
-def case_match_kinds(case, chunk_bin, index):
+def case_match_kinds(case, chunk_bin, index, failures):
     """Count off==1, off==P-with-len<=off and off==P-with-len>off per zstd case."""
     from edu_oracle import run_oracle
     e = case["elem_size"]
@@ -184,7 +184,8 @@ def case_match_kinds(case, chunk_bin, index):
         for blk in parse_chunk_blocks(ch, e):
             try:
                 d = run_oracle(blk)
-            except Exception:
+            except Exception as ex:  # a block the oracle cannot decode is a failure, not a skip
+                failures.append("%s frame %d: edu_oracle failed: %s" % (case["case"], i, ex))
                 continue
             olen = len(d["_output"])
             if olen == 0:
@@ -221,7 +222,7 @@ def main():
         index = json.load(open(os.path.join(DATA, case["case"] + ".index")))
         ok = check_case(lib, case, chunk_bin, index, failures)
         if stats and case["codec"] == "zstd":
-            c1, cP_le, cP_gt, nseq = case_match_kinds(case, chunk_bin, index)
+            c1, cP_le, cP_gt, nseq = case_match_kinds(case, chunk_bin, index, failures)
             seq_cases.append((case["case"], c1, cP_le, cP_gt, nseq))
 
     if stats:
