@@ -50,6 +50,7 @@ KERNEL_MAP = [
     ("DecompressSequences", "seq", "seq.cubin"),
     ("DecompressSequencesMultiStream", "seqms", "seqms.cubin"),
     ("FinaliseSequenceOffsets", "fso", "fso.cubin"),
+    ("CheckSequenceOffsets", "cso", "cso.cubin"),
     ("ExecuteSequences", "exec", "exec.cubin"),
     ("BitUnshuffleSlow", "unshuf", "unshuf.cubin"),
     ("BitUnshuffleWarp", "unshufw", "unshufw.cubin"),

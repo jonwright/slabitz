@@ -585,26 +585,14 @@ def patch_execute_sequences_srt(text):
     n = text.count(old)
     if n != 1:
         raise SystemExit("ExecuteSequences_SRT patch: expected 1 match, found %d" % n)
-    text = text.replace(old, new)
-    # T09: the frame refs (output base per frame) and the per-frame status
-    # (the typedef rewrite has already turned "} zstdgpu_ExecuteSequences_SRT;" into "};")
-    old = ("    ZSTDGPU_RO_BUFFER(zstdgpu_CompressedBlockData)          inCompressedBlocks;\n"
-           "};\n\nstruct zstdgpu_MemsetMemcpy_SRT")
-    new = ("    ZSTDGPU_RO_BUFFER(zstdgpu_CompressedBlockData)          inCompressedBlocks;\n"
-           "    ZSTDGPU_RO_BUFFER(zstdgpu_OffsetAndSize)                inUnCompressedFramesRefs;\n"
-           "    ZSTDGPU_RW_BUFFER(uint32_t)                             inoutFrameStatus;\n"
-           "};\n\nstruct zstdgpu_MemsetMemcpy_SRT")
-    n = text.count(old)
-    if n != 1:
-        raise SystemExit("ExecuteSequences_SRT T09 patch: expected 1 match, found %d" % n)
     return text.replace(old, new)
 
 
 # T09: per-frame output bounds. ComputeDestBlockOffsets (Slang entry) marks a block
 # that does not fit its frame with kzstdgpu_BlockDestOffs_Invalid and a frame
-# status; the writers skip such blocks. ExecuteSequences checks every match offset
-# against the bytes its frame has produced so far (a `--patch-from` frame, or a
-# corrupt one, reaches before the frame start), stops the frame and sets a status.
+# status; CheckSequenceOffsets (Slang entry) does the same for a block with a match
+# reaching before its frame's start (a `--patch-from` frame, or a corrupt one). The
+# writers (MemsetMemcpy, ExecuteSequences) skip such blocks.
 FRAME_STATUS_ANCHOR = (
     "static const uint32_t kzstdgpu_MaxRequestUncompressedByteSize    = 0x3FFFFFFFu;\n")
 FRAME_STATUS_ADD = (
@@ -626,68 +614,16 @@ def patch_frame_status_codes(text):
 
 
 EXEC_BOUNDS_PATCHES = [
-    # ExecuteSequences_Lit returns 1 when a match reaches before the frame start
-    ("static void zstdgpu_ExecuteSequences_Lit(ZSTDGPU_PARAM_INOUT(zstdgpu_ExecuteSequences_SRT) srt,",
-     "static uint32_t zstdgpu_ExecuteSequences_Lit(ZSTDGPU_PARAM_INOUT(zstdgpu_ExecuteSequences_SRT) srt,"),
-    ("                                         uint32_t seqIdx,\n"
-     "                                         uint32_t seqEnd)\n"
-     "{\n"
-     "    ZSTDGPU_BRANCH if (seqIdx < seqEnd)\n",
-     "                                         uint32_t seqIdx,\n"
-     "                                         uint32_t seqEnd,\n"
-     "                                         uint32_t frameBase)\n"
-     "{\n"
-     "    ZSTDGPU_BRANCH if (seqIdx < seqEnd)\n"),
-    ("            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);\n",
-     "            // T09: neither match may reach before the start of the frame\n"
-     "            const uint32_t produced0 = dstOfs + seq.llen - frameBase;\n"
-     "            ZSTDGPU_BRANCH if (seq.offs > produced0 || seq1.offs > produced0 + seq.mlen + seq1.llen)\n"
-     "            {\n"
-     "                return 1u;\n"
-     "            }\n"
-     "            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);\n"),
-    ("            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);\n",
-     "            ZSTDGPU_BRANCH if (seq.offs > dstOfs + seq.llen - frameBase)\n"
-     "            {\n"
-     "                return 1u;\n"
-     "            }\n"
-     "            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);\n"),
-    ("    zstdgpu_MemCpy_DstSrc(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, dstOfs, litBuf, litOfs, litEnd - litOfs, dstEnd);\n"
-     "}\n",
-     "    zstdgpu_MemCpy_DstSrc(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, dstOfs, litBuf, litOfs, litEnd - litOfs, dstEnd);\n"
-     "    return 0u;\n"
-     "}\n"),
-    # the entry: skip blocks marked invalid, pass the frame base, record the status
+    # the entry skips blocks marked invalid by ComputeDestBlockOffsets (outside their
+    # frame) or CheckSequenceOffsets (a match before the frame start). The offset
+    # check itself is a parallel kernel: a per-match test in this serial loop cost
+    # 25% on worst/min_matches (T09 gate, job 38896821).
     ("        const uint32_t blockByteEnd = blockByteBeg + blockSize;\n",
      "        const uint32_t blockByteEnd = blockByteBeg + blockSize;\n"
-     "        // T09: ComputeDestBlockOffsets found this block outside its frame\n"
+     "        // T09: this block is not written (its frame has a status)\n"
      "        ZSTDGPU_BRANCH if (blockByteBeg == kzstdgpu_BlockDestOffs_Invalid)\n"
      "        {\n"
      "            continue;\n"
-     "        }\n"
-     "        const uint32_t frameBase = srt.inUnCompressedFramesRefs[frameIdx].offs;\n"
-     "        uint32_t badOffset = 0u;\n"),
-    ("            zstdgpu_ExecuteSequences_Lit(srt, srt.inDecompressedLiterals, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd);",
-     "            badOffset = zstdgpu_ExecuteSequences_Lit(srt, srt.inDecompressedLiterals, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd, frameBase);"),
-    ("            zstdgpu_ExecuteSequences_Lit(srt, srt.inCompressedData, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd);",
-     "            badOffset = zstdgpu_ExecuteSequences_Lit(srt, srt.inCompressedData, litOffs, litOffs + litSize, blockByteBeg, blockByteEnd, seqOfs, seqEnd, frameBase);"),
-    ("                zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, seq.llen, blockByteEnd);\n",
-     "                ZSTDGPU_BRANCH if (seq.offs > blockByteCur + seq.llen - frameBase)\n"
-     "                {\n"
-     "                    badOffset = 1u;\n"
-     "                    break;\n"
-     "                }\n"
-     "                zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, seq.llen, blockByteEnd);\n"),
-    ("            zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, litSize - litCur, blockByteEnd);\n"
-     "        }\n"
-     "#endif\n",
-     "            zstdgpu_MemSet(srt.inoutUnCompressedFramesData, blockByteCur, symbol, litSize - litCur, blockByteEnd);\n"
-     "        }\n"
-     "#endif\n"
-     "        ZSTDGPU_BRANCH if (badOffset != 0u)\n"
-     "        {\n"
-     "            srt.inoutFrameStatus[frameIdx] = kzstdgpu_FrameStatus_OffsetBeforeFrame;\n"
-     "            return;\n"
      "        }\n"),
 ]
 

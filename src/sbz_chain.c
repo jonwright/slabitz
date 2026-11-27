@@ -1074,6 +1074,15 @@ static int stage2(sbz_dctx *dc)
     }
     if (getenv("SLABITZ_DEBUG_SYNC")) BE_TRY(dc->be->ops->sync(dc->be), "chk:Finalise");
 
+    /* [Check Sequence Offsets] (T09): one wave per compressed block; a match that
+     * reaches before its frame's start marks the block unwritten and sets the frame
+     * status (read after this stage, or at the wait). */
+    {
+        const sbz_scalar s[] = { { "seqCapacity", cntSeq }, { "frameCount", nf } };
+        TRY(launch(dc, SBZK_CheckSequenceOffsets, cmp, NULL, 0, s, NB(s)));
+    }
+    if (getenv("SLABITZ_DEBUG_SYNC")) BE_TRY(dc->be->ops->sync(dc->be), "chk:CheckSeqOffsets");
+
     /* [Memcpy RAW blocks, Memset RLE blocks]: one 256-thread group per block (grid.x =
      * block count; the kernel has no binary search). Bytes are stored through the u8 view
      * at block edges and as words through a second u32 view of the same buffer. */
@@ -1109,7 +1118,7 @@ static int stage2(sbz_dctx *dc)
         return SBZ_OK;
     }
     /* [Readback Counters :: After Block Decompression], and the per-frame status:
-     * ComputeDestBlockOffsets and ExecuteSequences report frames that do not fit
+     * ComputeDestBlockOffsets and CheckSequenceOffsets report frames that do not fit
      * their content size or reach before their start (T09) */
     TRY(read_counters(dc));
     BE_TRY(dc->be->ops->download(dc->be, dc->frame_status, dc->buf[B_FrameStatus].ptr,

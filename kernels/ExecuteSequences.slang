@@ -3,9 +3,8 @@
 // (WaveGetLaneCount()=32) so MAX_COPY_SIZE=32. One threadgroup per frame (groupId = frameIdx),
 // single wave (32 lanes) since WaveGetLaneCount()=32 retires the redundant lanes. Emits literal +
 // match runs into the output using the FinaliseSequenceOffsets-resolved byte offsets.
-// T09: a match reaching before the start of its frame stops the frame and sets
-// inoutFrameStatus[frame] = kzstdgpu_FrameStatus_OffsetBeforeFrame; blocks that
-// ComputeDestBlockOffsets marked kzstdgpu_BlockDestOffs_Invalid are skipped.
+// T09: blocks marked kzstdgpu_BlockDestOffs_Invalid (ComputeDestBlockOffsets,
+// CheckSequenceOffsets) are skipped.
 #include "slang_compat.h"
 
 #include "zstdgpu_shaders.h"
@@ -30,8 +29,6 @@ void main(StructuredBuffer<uint8_t> inCompressedData,
           StructuredBuffer<uint32_t> inGlobalBlockIndexPerCmpBlock,
           StructuredBuffer<uint32_t> inPerSeqStreamSeqStart,
           StructuredBuffer<zstdgpu_CompressedBlockData> inCompressedBlocks,
-          StructuredBuffer<zstdgpu_OffsetAndSize> inUnCompressedFramesRefs,
-          RWStructuredBuffer<uint32_t> inoutFrameStatus,
           uint32_t litCapacity, uint32_t seqCapacity,
           uint2 groupId2 : SV_GroupID, uint32_t i : SV_GroupThreadID)
 {
@@ -62,8 +59,6 @@ void main(StructuredBuffer<uint8_t> inCompressedData,
     srt.inGlobalBlockIndexPerCmpBlock   = inGlobalBlockIndexPerCmpBlock;
     srt.inPerSeqStreamSeqStart          = inPerSeqStreamSeqStart;
     srt.inCompressedBlocks              = inCompressedBlocks;
-    srt.inUnCompressedFramesRefs        = inUnCompressedFramesRefs;
-    srt.inoutFrameStatus                = inoutFrameStatus;
 
     const uint32_t frameIdx = zstdgpu_ConvertTo32BitGroupId(groupId2, 0);
     zstdgpu_ShaderEntry_ExecuteSequences(srt, frameIdx);

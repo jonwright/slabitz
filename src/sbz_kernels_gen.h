@@ -20,6 +20,7 @@ enum sbz_kernel_id {
     SBZK_DecompressSequences,
     SBZK_DecompressSequencesMultiStream,
     SBZK_FinaliseSequenceOffsets,
+    SBZK_CheckSequenceOffsets,
     SBZK_ExecuteSequences,
     SBZK_BitUnshuffleSlow,
     SBZK_BitUnshuffleWarp,
@@ -270,6 +271,21 @@ static const sbz_kparam sbz_kparams_FinaliseSequenceOffsets[] = {
     { "workItemCount", 2, 4, 0 },
     { "seqCapacity", 2, 4, 0 },
 };
+static const sbz_kparam sbz_kparams_CheckSequenceOffsets[] = {
+    { "inCounters", 0, 88, 0 },
+    { "inPerFrameBlockCountCMP", 0, 4, 0 },
+    { "inoutBlockDestOffs", 0, 4, 1 },
+    { "inGlobalBlockIndexPerCmpBlock", 0, 4, 0 },
+    { "inPerSeqStreamSeqStart", 0, 4, 0 },
+    { "inCompressedBlocks", 0, 16, 0 },
+    { "inDecompressedSequenceLLen", 0, 4, 0 },
+    { "inDecompressedSequenceMLen", 0, 4, 0 },
+    { "inDecompressedSequenceOffs", 0, 4, 0 },
+    { "inUnCompressedFramesRefs", 0, 8, 0 },
+    { "inoutFrameStatus", 0, 4, 1 },
+    { "seqCapacity", 2, 4, 0 },
+    { "frameCount", 2, 4, 0 },
+};
 static const sbz_kparam sbz_kparams_ExecuteSequences[] = {
     { "inCompressedData", 0, 1, 0 },
     { "inDecompressedLiterals", 0, 1, 0 },
@@ -286,8 +302,6 @@ static const sbz_kparam sbz_kparams_ExecuteSequences[] = {
     { "inGlobalBlockIndexPerCmpBlock", 0, 4, 0 },
     { "inPerSeqStreamSeqStart", 0, 4, 0 },
     { "inCompressedBlocks", 0, 16, 0 },
-    { "inUnCompressedFramesRefs", 0, 8, 0 },
-    { "inoutFrameStatus", 0, 4, 1 },
     { "litCapacity", 2, 4, 0 },
     { "seqCapacity", 2, 4, 0 },
 };
@@ -367,7 +381,8 @@ static const sbz_kinfo sbz_kernel_table[SBZK_COUNT] = {
     { "DecompressSequences", "seq/seq.cubin", "main_0", 1, 20, sbz_kparams_DecompressSequences },
     { "DecompressSequencesMultiStream", "seqms/seqms.cubin", "main_0", 32, 21, sbz_kparams_DecompressSequencesMultiStream },
     { "FinaliseSequenceOffsets", "fso/fso.cubin", "main_0", 256, 13, sbz_kparams_FinaliseSequenceOffsets },
-    { "ExecuteSequences", "exec/exec.cubin", "main_0", 32, 19, sbz_kparams_ExecuteSequences },
+    { "CheckSequenceOffsets", "cso/cso.cubin", "main_0", 32, 13, sbz_kparams_CheckSequenceOffsets },
+    { "ExecuteSequences", "exec/exec.cubin", "main_0", 32, 17, sbz_kparams_ExecuteSequences },
     { "BitUnshuffleSlow", "unshuf/unshuf.cubin", "main_0", 256, 7, sbz_kparams_BitUnshuffleSlow },
     { "BitUnshuffleWarp", "unshufw/unshufw.cubin", "main_0", 256, 10, sbz_kparams_BitUnshuffleWarp },
     { "Lz4DecodeBlocks", "lz4/lz4.cubin", "main_0", 32, 6, sbz_kparams_Lz4DecodeBlocks },
@@ -377,6 +392,6 @@ static const sbz_kinfo sbz_kernel_table[SBZK_COUNT] = {
 
 /* Build ID of the kernel set this library was generated with; a kernel
  * directory must carry the same ID in its sbz_kernels.id file. */
-#define SBZ_KERNELS_ID "5daca50f9a345f92"
+#define SBZ_KERNELS_ID "43939ae92ad92619"
 
 #endif /* SBZ_KERNELS_GEN_H */
