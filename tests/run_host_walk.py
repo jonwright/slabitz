@@ -10,11 +10,13 @@ totals are checked against the edu_oracle. Every check prints the number of
 values compared and fails if that is zero.
 
 Corrupt inputs, one per host-walk check, must return SBZ_ERR_CORRUPT (or
-SBZ_ERR_LIMIT for the RLE-over-4 GiB case) and must not hang.
+SBZ_ERR_LIMIT for the RLE-over-4 GiB case) and must not hang. Valid frames this
+decoder does not handle (dictionary, window >= 2^29, no content size) must return
+SBZ_ERR_UNSUPPORTED with a named message (T09).
 
 Finally it builds and runs the ASan/UBSan fuzz binary (tests/fuzz_host_walk.c)
 on a fixed-seed mutation corpus and requires that OK, CORRUPT and LIMIT are all
-reached with no sanitizer report.
+reached with no sanitizer report (UNSUPPORTED is counted too).
 """
 import ctypes as ct
 import os
@@ -40,7 +42,7 @@ TIMEOUT = 120
 FUZZ_TIMEOUT = 60  # a healthy 200000-mutant run takes about 1 s
 FUZZ_MUTANTS = 200000
 
-SBZ_OK, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT = 0, -5, -6
+SBZ_OK, SBZ_ERR_CORRUPT, SBZ_ERR_LIMIT, SBZ_ERR_UNSUPPORTED = 0, -5, -6, -7
 ZSTD_MAGIC = 0xFD2FB528
 BLOCK_MAX = 128 * 1024
 
@@ -316,19 +318,45 @@ def raw_frame(payload, fcs_flag=2, last=True, desc_or=0, corrupt_block=None,
 CORRUPT_CASES = []
 
 
-def add_corrupt(name, comp, expect):
-    CORRUPT_CASES.append((name, comp, expect))
+def add_corrupt(name, comp, expect, msg=None):
+    CORRUPT_CASES.append((name, comp, expect, msg))
+
+
+def hand_frame(blocks, window_log=None, fcs=None, dict_id=None):
+    """One zstd frame with explicit header fields. window_log=None: single
+    segment (fcs required, 4-byte field); otherwise a window descriptor of
+    2^window_log and, if fcs is not None, a 4-byte content size. dict_id: a
+    1-byte Dictionary_ID field. blocks: list of (type, size, payload)."""
+    desc = 0
+    if window_log is None:
+        desc |= 0x20
+    if fcs is not None:
+        desc |= 2 << 6
+    if dict_id is not None:
+        desc |= 0x01
+    out = struct.pack("<I", ZSTD_MAGIC) + bytes([desc])
+    if window_log is not None:
+        out += bytes([(window_log - 10) << 3])
+    if dict_id is not None:
+        out += bytes([dict_id])
+    if fcs is not None:
+        out += struct.pack("<I", fcs)
+    for i, (btype, size, payload) in enumerate(blocks):
+        hdr = (1 if i == len(blocks) - 1 else 0) | (btype << 1) | (size << 3)
+        out += struct.pack("<I", hdr)[:3] + payload
+    return out
 
 
 def rle_limit_frame():
     """Non-single-segment frame of RLE blocks; decoded bytes exceed 32 bits.
 
-    No content-size field (single_segment clear), a one-byte window descriptor,
-    then 32768 RLE blocks of BLOCK_MAX decoded bytes each: the running raw/RLE
-    byte total passes 4 GiB, which the walk reports as SBZ_ERR_LIMIT.
+    A 128 KiB window and a (lying) 4-byte content size of 16, then 32768 RLE
+    blocks of BLOCK_MAX decoded bytes each: the running raw/RLE byte total passes
+    4 GiB, which the walk reports as SBZ_ERR_LIMIT.
     """
     nblocks = 32768  # 32768 x 128 KiB = 4 GiB > 0xFFFFFFF0
-    pre = struct.pack("<I", ZSTD_MAGIC) + bytes([0x00, 0x00])  # magic, desc, window desc
+    # magic, desc (FCS flag 2: 4 bytes), window descriptor 2^17, content size 16
+    pre = struct.pack("<I", ZSTD_MAGIC) + bytes([0x80, (17 - 10) << 3]) + struct.pack("<I", 16)
     mid = b"\x02\x00\x10\x42" * (nblocks - 1)      # RLE, size=131072, last=0, symbol 'B'
     last = b"\x03\x00\x10\x42"                     # RLE, size=131072, last=1, symbol 'B'
     return pre + mid + last
@@ -351,9 +379,9 @@ def build_corrupt_cases():
     # E. reserved descriptor bit (bit 3) set
     fr = raw_frame(tiny)
     add_corrupt("E-reserved-desc-bit", fr[:4] + bytes([fr[4] | 0x08]) + fr[5:], SBZ_ERR_CORRUPT)
-    # F. nonzero dictionary id ("dictionary id N not supported")
+    # F. Dictionary_ID field (T09: UNSUPPORTED, any value, including 0)
     add_corrupt("F-dict-id", struct.pack("<I", ZSTD_MAGIC) + bytes([0x21, 0x07, 0x05]),
-                SBZ_ERR_CORRUPT)
+                SBZ_ERR_UNSUPPORTED, "frame 0: dictionary")
     # G. block header (3 bytes) runs past content (frame not terminated)
     add_corrupt("G-no-block", struct.pack("<I", ZSTD_MAGIC) + bytes([0x20, 0x00]),
                 SBZ_ERR_CORRUPT)
@@ -374,19 +402,38 @@ def build_corrupt_cases():
                 SBZ_ERR_CORRUPT)
     # N. SBZ_ERR_LIMIT: RLE blocks declare over 4 GiB decoded
     add_corrupt("N-limit-rle-4gib", rle_limit_frame(), SBZ_ERR_LIMIT)
+    # T09: frame-level rejects (UNSUPPORTED) and Block_Maximum_Size = min(window, 128 KiB)
+    add_corrupt("T09-dict-id-0", hand_frame([(0, 5, b"ABCDE")], fcs=5, window_log=10, dict_id=0),
+                SBZ_ERR_UNSUPPORTED, "frame 0: dictionary (id 0)")
+    add_corrupt("T09-window-2^29", hand_frame([(0, 5, b"ABCDE")], window_log=29, fcs=5),
+                SBZ_ERR_UNSUPPORTED, "frame 0: window 2^29 exceeds 2^29")
+    add_corrupt("T09-window-2^31", hand_frame([(0, 5, b"ABCDE")], window_log=31, fcs=5),
+                SBZ_ERR_UNSUPPORTED, "frame 0: window 2^31 exceeds 2^29")
+    add_corrupt("T09-no-fcs", hand_frame([(0, 5, b"ABCDE")], window_log=10),
+                SBZ_ERR_UNSUPPORTED, "frame 0: no content size")
+    add_corrupt("T09-raw-block-over-window",
+                hand_frame([(0, 1500, b"x" * 1500)], window_log=10, fcs=1500),
+                SBZ_ERR_CORRUPT, "block size 1500 exceeds the block maximum 1024")
+    add_corrupt("T09-rle-block-over-window", hand_frame([(1, 1500, b"y")], window_log=10, fcs=1500),
+                SBZ_ERR_CORRUPT, "block size 1500 exceeds the block maximum 1024")
+    add_corrupt("T09-cmp-block-over-fcs-window",
+                hand_frame([(2, 40, bytes(40))], fcs=32),
+                SBZ_ERR_CORRUPT, "block size 40 exceeds the block maximum 32")
 
 
-def check_corrupt(lib, name, comp, expect):
+def check_corrupt(lib, name, comp, expect, msg=None):
     dc = make(lib, ct.create_string_buffer(512))
     if not dc:
         print("[%s] FAIL: create context" % name)
         return False
     try:
         rc = lib.sbz_dctx_decompress(dc, comp, len(comp))
+        err = (lib.sbz_dctx_error(dc) or b"").decode(errors="replace")
     finally:
         lib.sbz_dctx_destroy(dc)
-    ok = rc == expect
-    print("[%s] %s: rc=%d (want %d)" % (name, "OK" if ok else "FAIL", rc, expect))
+    ok = rc == expect and (msg is None or msg in err)
+    print("[%s] %s: rc=%d (want %d)%s" % (name, "OK" if ok else "FAIL", rc, expect,
+                                         (" msg %r" % err) if msg is not None else ""))
     return ok
 
 
@@ -463,13 +510,14 @@ def run_fuzz():
     if p.returncode != 0:
         print("[fuzz] FAIL: nonzero exit (sanitizer or out-of-set return)")
         return False
-    m = re.search(r"mutants=(\d+) OK=(\d+) CORRUPT=(\d+) LIMIT=(\d+)", p.stdout)
+    m = re.search(r"mutants=(\d+) OK=(\d+) CORRUPT=(\d+) LIMIT=(\d+) UNSUPPORTED=(\d+)",
+                  p.stdout)
     if not m:
         print("[fuzz] FAIL: could not parse fuzz histogram")
         return False
-    n, ok, corrupt, limit = map(int, m.groups())
-    print("[fuzz] %s: OK=%d CORRUPT=%d LIMIT=%d (all nonzero)"
-          % ("OK" if ok and corrupt and limit else "FAIL", ok, corrupt, limit))
+    n, ok, corrupt, limit, unsup = map(int, m.groups())
+    print("[fuzz] %s: OK=%d CORRUPT=%d LIMIT=%d (all nonzero) UNSUPPORTED=%d"
+          % ("OK" if ok and corrupt and limit else "FAIL", ok, corrupt, limit, unsup))
     return ok > 0 and corrupt > 0 and limit > 0
 
 
@@ -510,8 +558,8 @@ def main():
 
     # --- corrupt inputs ---
     build_corrupt_cases()
-    for name, comp, expect in CORRUPT_CASES:
-        o = check_corrupt(lib, name, comp, expect)
+    for name, comp, expect, msg in CORRUPT_CASES:
+        o = check_corrupt(lib, name, comp, expect, msg)
         ok &= o
 
     # --- fuzz ---

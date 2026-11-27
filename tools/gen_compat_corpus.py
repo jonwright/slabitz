@@ -59,7 +59,8 @@ BSHUF_LIB = TL_BUILD / "bitshuffle-0.4.0" / "libbshuf040.so"
 # zstd of the bitshuffle-0.4.0 submodule (the floor encoder).
 BSHUF_ZSTD = "18d02cbf"
 
-REJECT = "reject:SBZ_ERR_CORRUPT"
+REJECT = "reject:SBZ_ERR_UNSUPPORTED"   # valid zstd this decoder does not handle (T09)
+REJECT_CORRUPT = "reject:SBZ_ERR_CORRUPT"  # --patch-from: indistinguishable from corrupt (T09)
 
 # ---- zstd CLI modes ---------------------------------------------------------
 # (mode, list-of-CLI-args, input-key, needs-special-arg)
@@ -402,7 +403,8 @@ def gen_full(log):
                 dsize = len(data)
                 dsha = sha256(data)
 
-            exp = REJECT if mode in EXPECT_REJECT_MODES else "decode"
+            exp = (REJECT_CORRUPT if mode == "patchfrom" else
+                   REJECT if mode in EXPECT_REJECT_MODES else "decode")
             if mode in ("streaming", "nocontent") and frame_has_fcs(cbytes):
                 exp = "decode"     # this CLI wrote an FCS after all
             entries.append(_entry(version, mode, inkey, cbytes, exp,
@@ -531,7 +533,7 @@ def gen_subset(log, full_entries):
         # no-FCS and window-30 expected-reject cases
         for name in ("streaming_text.zst", "long30_long30.zst"):
             e = relmap.get((version, name))
-            if e and e["expectation"] == REJECT:
+            if e and e["expectation"].startswith("reject:"):
                 chosen["%s/%s" % (version, name)] = e
 
     for e in full_entries:
