@@ -45,10 +45,14 @@ KDIR = os.environ.get("SLABITZ_KERNEL_DIR", os.path.join(ROOT, "build"))
 WALL_SLOWER = 1.05        # wall median more than 5% slower ...
 WALL_IQR_FACTOR = 3.0     # ... and the difference above 3x the larger IQR
 KERNEL_SLOWER = 1.10      # a kernel more than 10% slower ...
-KERNEL_MIN_US = 20.0      # ... and its device time (now) above 20 us per call
-# profile rows recorded but not gated: host allocations and frees happen on a context's first
-# calls only (the profile context is fresh), and "sync" is a host wait, not device work
-KERNEL_NOT_GATED = ("alloc", "free", "sync", "total")
+KERNEL_MIN_US = 20.0      # ... and more than 20 us per call slower (the noise run on the L40S
+                          # showed 10-15% jitter on 20-30 us kernels: about 3 us, the
+                          # resolution of the synced profile)
+# profile rows recorded but not gated: they are not kernels. alloc/free happen on a context's
+# first calls only (the profile contexts are fresh), sync is a host wait, and
+# upload/download/fill32 are memory operations timed from the host (in the noise run they
+# varied by up to 7x between identical runs)
+KERNEL_NOT_GATED = ("alloc", "free", "sync", "total", "upload", "download", "fill32")
 FASTER = 0.95             # improvements listed (refresh the baseline in the same PR)
 # ---- measurement ----
 FRAMES = 16               # frames (chunks) per call
@@ -60,7 +64,8 @@ IDLE_SETTLE_S = 3.0       # before the closing idle check: nvidia-smi utilisatio
 WARMUP = 2
 REPS = 9
 ASYNC_CALLS = 4           # one async/device repetition: this many calls, two contexts alternated
-PROFILE_CALLS = 3         # calls in the SLABITZ_PROFILE=1 context (device us = total / calls)
+PROFILE_CTXS = 5          # fresh SLABITZ_PROFILE=1 contexts per cell; kernel us = median ...
+PROFILE_CALLS = 2         # ... over the contexts of (total / calls) in each
 # ---- idle guard ----
 IDLE_MAX_UTIL = 5         # percent
 IDLE_MAX_FOREIGN_MB = 1024
@@ -481,9 +486,16 @@ class Runner:
         return res
 
     def profile(self, inp, mode, dev_src):
-        """Device time per kernel and op, us per call, from a fresh context with
-        SLABITZ_PROFILE=1 (it syncs after every op, so it is kept apart from the wall time).
-        The table is printed to stderr when the context is destroyed: fd 2 is redirected."""
+        """Device time per kernel and op, us per call: the median over PROFILE_CTXS fresh
+        contexts with SLABITZ_PROFILE=1 (it syncs after every op, so it is kept apart from
+        the wall time) of each context's mean over PROFILE_CALLS calls."""
+        runs = [self.profile_one(inp, mode, dev_src) for _ in range(PROFILE_CTXS)]
+        keys = sorted(set().union(*runs))
+        return {k: round(float(np.median([r.get(k, 0.0) for r in runs])), 2) for k in keys}
+
+    def profile_one(self, inp, mode, dev_src):
+        """One profiled context. Its table is printed to stderr when it is destroyed: fd 2
+        is redirected to read it."""
         os.environ["SLABITZ_PROFILE"] = "1"
         try:
             dc = new_dctx(self.lib)
@@ -721,7 +733,7 @@ def header(cuda, args):
         slurm_job=os.environ.get("SLURM_JOB_ID", ""),
         date=datetime.datetime.now().isoformat(timespec="seconds"),
         frames_per_call=args.frames, warmup=WARMUP, reps=REPS, async_calls=ASYNC_CALLS,
-        profile_calls=PROFILE_CALLS, pac=pac_version(),
+        profile_calls=PROFILE_CALLS, profile_contexts=PROFILE_CTXS, pac=pac_version(),
         selftest=os.environ.get("SLABITZ_GATE_SELFTEST", ""),
     )
 
@@ -783,7 +795,7 @@ def compare(base, now, allow_missing=False, out=sys.stdout):
             nus = n.get("kernels_us", {}).get(k)
             if nus is None or k in KERNEL_NOT_GATED:
                 continue
-            if nus > KERNEL_SLOWER * bus and nus > KERNEL_MIN_US:
+            if nus > KERNEL_SLOWER * bus and nus - bus > KERNEL_MIN_US:
                 notes.append("SLOWER kernel %s %.1f -> %.1f us" % (k, bus, nus))
                 fails.append("%s: kernel %s %.1f -> %.1f us (x%.2f)" % (name, k, bus, nus,
                                                                        nus / bus))
@@ -942,7 +954,7 @@ def report_fails(fails):
 def noise_report(r1, r2):
     """Largest run-to-run wall ratio (and kernel ratio) per cell."""
     print("\nnoise: run-to-run ratio max(a/b, b/a) per cell")
-    print("%-48s %8s %8s %8s  %s" % ("cell", "run1 ms", "run2 ms", "wall", "worst kernel >20us"))
+    print("%-48s %8s %8s %8s  %s" % ("cell", "run1 ms", "run2 ms", "wall", "worst kernel (diff >20us)"))
     ratios = []
     for name, a in r1["cells"].items():
         b = r2["cells"].get(name)
@@ -953,7 +965,7 @@ def noise_report(r1, r2):
         kr, kn = 1.0, ""
         for k, ua in a["kernels_us"].items():
             ub = b["kernels_us"].get(k)
-            if ub and k not in KERNEL_NOT_GATED and max(ua, ub) > KERNEL_MIN_US:
+            if ub and k not in KERNEL_NOT_GATED and abs(ua - ub) > KERNEL_MIN_US:
                 r = max(ua, ub) / min(ua, ub)
                 if r > kr:
                     kr, kn = r, k
