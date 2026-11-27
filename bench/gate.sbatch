@@ -22,6 +22,8 @@ sbz build
 if [ $# -gt 0 ]; then
     timeout 6000 python3 bench/gate.py "$@"
 else
-    timeout 3000 python3 bench/gate.py --write-baseline
-    timeout 3000 python3 bench/gate.py --noise
+    rc=0
+    timeout 3000 python3 bench/gate.py --write-baseline || rc=$?
+    timeout 3000 python3 bench/gate.py --noise || rc=$?
+    exit $rc
 fi

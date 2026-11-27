@@ -52,6 +52,11 @@ KERNEL_NOT_GATED = ("alloc", "free", "sync", "total")
 FASTER = 0.95             # improvements listed (refresh the baseline in the same PR)
 # ---- measurement ----
 FRAMES = 16               # frames (chunks) per call
+# zstd output per call is capped by the decoder (kzstdgpu_MaxRequestUncompressedByteSize,
+# 30-bit block offsets): a zstd cell whose 16 frames exceed it (thaumatin u32, 16 x 72 MB) runs
+# with as many whole frames as fit; the cell records its frame count
+ZSTD_MAX_CALL_BYTES = 0x3FFFFFFF
+IDLE_SETTLE_S = 3.0       # before the closing idle check: nvidia-smi utilisation lags
 WARMUP = 2
 REPS = 9
 ASYNC_CALLS = 4           # one async/device repetition: this many calls, two contexts alternated
@@ -646,9 +651,12 @@ def run_matrix(args, cuda, only, passes=1):
                                 time.perf_counter() - t), flush=True)
                         if spec["codec"] not in inputs:
                             t = time.perf_counter()
-                            chunks = encode_real(spec["codec"], frames, pac_holder)
+                            fit = frames
+                            if spec["fam"] == "zstd" and frames.nbytes > ZSTD_MAX_CALL_BYTES:
+                                fit = frames[:ZSTD_MAX_CALL_BYTES // frames[0].nbytes]
+                            chunks = encode_real(spec["codec"], fit, pac_holder)
                             inputs[spec["codec"]] = Input(spec["fam"], chunks,
-                                                          frames.dtype.itemsize, frames)
+                                                          frames.dtype.itemsize, fit)
                             print("#   %s encoded in %.1f s" % (spec["codec"],
                                                                time.perf_counter() - t),
                                   flush=True)
@@ -671,6 +679,7 @@ def run_matrix(args, cuda, only, passes=1):
                         if os.environ.get("SLABITZ_GATE_DEBUG"):
                             import traceback
                             traceback.print_exc()
+                    r["frames"] = len(inp.chunks)
                     r["input_bytes"] = int(len(inp.src))
                     r["output_bytes"] = int(len(inp.want))
                     out[p][name] = r
@@ -678,7 +687,8 @@ def run_matrix(args, cuda, only, passes=1):
                         print("%-48s %9.3f ms  iqr %7.3f  %8.2f GB/s  compared %d%s" % (
                             name, r["wall_ms"], r["iqr_ms"],
                             r["output_bytes"] / r["wall_ms"] / 1e6, r["compared_bytes"],
-                            "" if passes == 1 else "  (pass %d)" % (p + 1)), flush=True)
+                            ("" if r["frames"] == args.frames else "  (%d frames)" % r["frames"])
+                            + ("" if passes == 1 else "  (pass %d)" % (p + 1))), flush=True)
                     else:
                         print("%-48s FAIL: %s" % (name, r["why"]), flush=True)
             del frames, inputs
@@ -867,6 +877,7 @@ def main():
         a.frames, hdr["slurm_node"] or hdr["host"]), flush=True)
     t0 = time.time()
     passes = run_matrix(a, cuda, a.only, passes=2 if a.noise else 1)
+    time.sleep(IDLE_SETTLE_S)
     st1, why1 = idle_problems(bus)
     hdr["gpu_state_before"], hdr["gpu_state_after"] = st0, st1
     hdr["elapsed_s"] = round(time.time() - t0, 1)
