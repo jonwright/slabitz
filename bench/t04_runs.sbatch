@@ -74,6 +74,8 @@ bisect)
     # Q2 cause: the current kernel with MatchCopy branches switched off (wt/t04-var-*:
     # a = no aligned uint32 copy, b = no aligned uint4 copy, c = no offset-1 vector fill,
     # d = none of the three), against 439e2f2
+    # T04a: BISECT_LIBS="439e2f2 main var-f var-g ..." with wt/t04-var-<x> built from
+    # bench/t04a_variants/var-<x>.patch (see docs/dev/reports/T04a.md)
     for r in $(seq 1 "$ROUNDS"); do
         for k in ${BISECT_LIBS:-439e2f2 main var-a var-b var-c var-d}; do
             gate bis-$k "$r" SLABITZ_LIB="$(lib $k)" -- --only pac-zstd/ --only zstd3/ \

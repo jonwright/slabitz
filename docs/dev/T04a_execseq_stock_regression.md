@@ -1,6 +1,6 @@
 # T04a: ExecuteSequences regression on stock zstd since b840caa
 
-Status: todo
+Status: review (no fix; `docs/dev/reports/T04a.md`)
 Executor: Claude (kernel, through the DS transform)
 Depends on: T04 (the measurements and scripts)
 Branch: `t04a-execseq-stock`
