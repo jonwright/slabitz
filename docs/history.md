@@ -230,6 +230,19 @@ output element by element with the reference and the oracle.
     folded plans moved to `docs/archive/`. New scope: a regression gate,
     the bslz4_to_sparse decoder hook as the friendly API, and GPU
     compression (LZ4 first, then zstd).
+30. **Agent root, synthetic data, kernel argument checks** (2026-11-25 to
+    2026-11-27, PRs #4-#6). T-1 (b0e3eb6): one shared root
+    (`$SLABITZ_DEV_ROOT`) with one pixi env, shared real and synthetic data,
+    a kernel cache keyed by kernel sources, one git worktree per task
+    (`dev-root`), and `sbz`/`gpu-run` so agents no longer set up pixi or
+    hunt for data. T00 (9088d09): fitted generator `tools/synth` version 2,
+    twins of the 8 real files plus extensions and worst cases; 250 of 256
+    compare checks pass, the 6 misses accepted by the maintainer. T01
+    (e5e8271): `tests/kparams.py` parses `src/sbz_kernels_gen.h` and
+    `check_args` runs before every Python kernel launch; the six stale
+    scripts fixed (3 segfaults, 3 invalid-argument errors on `main`), every
+    script reports a nonzero compared count, two retired; `sbz test-kernels`
+    30 pass, 0 fail.
 
 ## Publication snapshot
 

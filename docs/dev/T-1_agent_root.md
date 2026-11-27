@@ -1,6 +1,6 @@
 # T-1: Shared agent root: one environment, shared data, one worktree per task
 
-Status: review
+Status: done (b0e3eb6)
 Executor: Claude (infrastructure every later task depends on; must be right)
 Depends on: -
 Branch: `t-1-agent-root`

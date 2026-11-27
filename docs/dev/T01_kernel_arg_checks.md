@@ -1,6 +1,6 @@
 # T01: Kernel argument checks for every Python launcher
 
-Status: review
+Status: done (e5e8271)
 Executor: Claude (small, but the fixes need care about buffer meanings)
 Depends on: T-1
 Branch: `t01-kernel-arg-checks`

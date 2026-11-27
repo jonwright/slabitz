@@ -41,7 +41,7 @@ workspace (see README.md).
 
 Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 
-## Status (2026-11-25)
+## Status (2026-11-27)
 
 | Area | State |
 |---|---|
@@ -60,11 +60,11 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | Python wrapper, packaging, pytest suite | not started (tests are standalone scripts; a ctypes loader is in `slabitz/`) |
 | P4 streaming API | async LZ4 + zstd calls, device-input LZ4 (`sbz_dctx_*_async`, `_device`, `sbz_dctx_wait`); zstd device input, public header, per-chunk status: T12, T13 |
 | zstd version coverage | corpus from libzstd 1.5.7 only; target bitshuffle 0.4.0's bundled zstd (`18d02cbf`, v1.4.7-403) to 1.6.0: T06, T07, T09, T10 |
-| Per-kernel Python scripts | 6 of 24 pass outdated argument lists (found 2026-11-25; none is in `pixi run test`): T01 |
+| Per-kernel Python scripts | every launcher calls `tests/kparams.check_args` (signatures parsed from `src/sbz_kernels_gen.h`) before launch; `sbz test-kernels` runs 22 scripts + 8 modes, 30 pass with nonzero compared counts, 2 retired (`run_parse_blocks`, `smoke_initfsetable`); `docs/dev/reports/T01.md` |
 | Performance regression gate | none: numbers live in prose, no stored baseline: T03 |
 | Compression | not started; LZ4 then zstd: T17-T19 |
-| Agent environment | each agent sets up pixi and data itself (recurring failures): shared root T-1 |
-| Synthetic data | fitted generator `tools/synth` (version 2), twins of the 8 real files, 36 extensions, 24 worst cases in `data/synth/current` (= `v2`); compare 250 of 256 checks pass (6 misses, all accepted by the maintainer: al2o3 x3 as known; hplc class 2-3 and eiger4m_u32 zstd 3 byte split as near enough), GPU decode time of 5 twin/real pairs within 5%; `docs/dev/reports/T00.md`: T00 |
+| Agent environment | shared root `$SLABITZ_DEV_ROOT`: one env, shared data and kernel cache, one worktree per task (`dev-root`, `sbz`, `gpu-run`); `AGENT_START.md`, `docs/dev/reports/T-1.md` |
+| Synthetic data | fitted generator `tools/synth` (version 2), twins of the 8 real files, 36 extensions, 24 worst cases in `data/synth/current` (= `v2`); compare 250 of 256 checks pass (6 misses, all accepted by the maintainer: al2o3 x3 as known; hplc class 2-3 and eiger4m_u32 zstd 3 byte split as near enough), GPU decode time of 5 twin/real pairs within 5%; `docs/dev/reports/T00.md` |
 
 Output lives on the device (`UnCompressedFramesData` / `BshufOutput`);
 `sbz_dctx_read_buffer` copies a named buffer back (also the debug hook for
