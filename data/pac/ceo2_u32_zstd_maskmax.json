@@ -1,0 +1,40 @@
+{
+ "case": "ceo2_u32_zstd_maskmax",
+ "codec": "zstd",
+ "elem_size": 4,
+ "block_bytes": 253952,
+ "frames": [
+  {
+   "source": "ceo2_u32_zstd2_256k.h5",
+   "dataset": "entry_0000/ESRF-ID11/eiger/data",
+   "frame": 0,
+   "rows": [
+    0,
+    48
+   ],
+   "width": 2068,
+   "mask": "max-1",
+   "elem_size": 4,
+   "codec": "zstd",
+   "decoded_bytes": 397056,
+   "sha256": "e41e4dc8bf4cfdacf1c0f05be6ff8b7164bbb3d066344d9a0b83c2b6a4a77626"
+  },
+  {
+   "source": "ceo2_u32_zstd2_256k.h5",
+   "dataset": "entry_0000/ESRF-ID11/eiger/data",
+   "frame": 1,
+   "rows": [
+    0,
+    48
+   ],
+   "width": 2068,
+   "mask": "max-1",
+   "elem_size": 4,
+   "codec": "zstd",
+   "decoded_bytes": 397056,
+   "sha256": "2f41bd78b3513d1a5e80f18911b495866a800c7fa492c4f269ecfb235b323185"
+  }
+ ],
+ "pac_version": "0.2.0",
+ "pac_commit": "162af8b07795bd0c290b54b635e966b631f2cf97"
+}

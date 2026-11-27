@@ -1,0 +1,55 @@
+{
+ "case": "silicon_u32_zstd_mask0",
+ "codec": "zstd",
+ "elem_size": 4,
+ "block_bytes": 253952,
+ "frames": [
+  {
+   "source": "silicon_u16_zstd2_256k.h5",
+   "dataset": "entry_0000/ESRF-ID11/eiger/data",
+   "frame": 25,
+   "rows": [
+    0,
+    512
+   ],
+   "width": 2068,
+   "mask": 0,
+   "elem_size": 4,
+   "codec": "zstd",
+   "decoded_bytes": 4235264,
+   "sha256": "31d7d6ac6efe1560a2e0cd3324f425905c62774c21092854e9a2eb5d755dcbf5"
+  },
+  {
+   "source": "silicon_u16_zstd2_256k.h5",
+   "dataset": "entry_0000/ESRF-ID11/eiger/data",
+   "frame": 26,
+   "rows": [
+    0,
+    512
+   ],
+   "width": 2068,
+   "mask": 0,
+   "elem_size": 4,
+   "codec": "zstd",
+   "decoded_bytes": 4235264,
+   "sha256": "933d6e4427c5ba765e31112550119d2ecf656918f42ca9b28e333076acb37ffe"
+  },
+  {
+   "source": "silicon_u16_zstd2_256k.h5",
+   "dataset": "entry_0000/ESRF-ID11/eiger/data",
+   "frame": 27,
+   "rows": [
+    0,
+    512
+   ],
+   "width": 2068,
+   "mask": 0,
+   "elem_size": 4,
+   "codec": "zstd",
+   "decoded_bytes": 4235264,
+   "sha256": "f3e16fe5d7916ad08f3126ad982e2f205fffc15775aea68d63799c9ff39f26b8"
+  }
+ ],
+ "pac_version": "0.2.0",
+ "pac_commit": "162af8b07795bd0c290b54b635e966b631f2cf97"
+}

@@ -236,6 +236,8 @@ def main():
     total = subset(lib, failures)
     if SYNTH:
         total += full(lib, failures)
+    elif os.environ.get("SLABITZ_REQUIRE_DATA") == "1":  # T02
+        failures.append("data required but SLABITZ_SYNTH is not set: the full set was not run")
     else:
         print("SLABITZ_SYNTH not set: the full set was not run")
     CTX.reset()
