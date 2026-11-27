@@ -125,7 +125,8 @@ input to T09 and T10.
 ## Files that may change
 
 `tools/gen_compat_corpus.py`, `tests/run_compat.py`,
-`tests/data/compat/*` (5 MB at most), `pixi.toml` (test list),
+`tests/data/compat/*` (5 MB at most), `tests/data/compat_bugs/*`,
+`tools/sbz.sh` (the `sbz test` list),
 `tests/test_suite.py`, `docs/dev/reports/T07.md`.
 
 ## Acceptance
