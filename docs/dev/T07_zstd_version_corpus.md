@@ -1,6 +1,6 @@
 # T07: zstd version corpus: bitshuffle 0.4.0's zstd to 1.6.0
 
-Status: todo
+Status: review (`docs/dev/reports/T07.md`)
 Executor: worker (DeepSeek), reviewed by Claude
 Depends on: T06 (oracle tags and the expectation mechanism)
 Branch: `t07-zstd-versions`
@@ -54,16 +54,29 @@ input to T09 and T10.
 ## Settled design
 
 - **Builder: `tools/gen_compat_corpus.py`.**
-  - It builds the zstd CLI and libzstd for each version. Builds go in
-    `$SLABITZ_DEV_ROOT/toolchains/zstd-<version>/`, and the corpus goes in
-    `$SLABITZ_DEV_ROOT/data/compat/`. These shared root folders are the
-    exception to "write only in your worktree"; this task owns them.
+  - Sources are staged offline (by the reviewer, 2026-11-27) in
+    `$SLABITZ_DEV_ROOT/toolchains/src/`: `zstd-<version>/` for the 9
+    versions (`git archive` of the pac-zstd zstd submodule, which has every
+    tag and 18d02cbf) and `bitshuffle-0.4.0/` (the GitHub 0.4.0 tarball;
+    its `zstd/` submodule folder is empty). Never download anything.
+  - It builds the zstd CLI and libzstd for each version (`make -C
+    lib libzstd` and `make -C programs zstd`, out of a copy of the source
+    tree). Builds go in `$SLABITZ_DEV_ROOT/toolchains/zstd-<version>/`, and
+    the corpus goes in `$SLABITZ_DEV_ROOT/data/compat/`. These shared root
+    folders are the exception to "write only in your worktree"; this task
+    owns them. `toolchains/src/` is read-only.
   - Versions: `v1.4.7`, `18d02cbf` (bitshuffle 0.4.0's), `v1.4.9`,
     `v1.5.0`, `v1.5.2`, `v1.5.5`, `v1.5.6`, `v1.5.7` and `v1.6.0`.
-  - It also builds bitshuffle 0.4.0 itself (its 0.4.0 commit with that
-    submodule) into a venv in `$SLABITZ_DEV_ROOT/toolchains/bitshuffle-0.4.0/`, to write
-    filter-32008 zstd chunks with h5py, as a detector pipeline of 2022
-    would.
+  - **bitshuffle 0.4.0 without a venv** (pip cannot run offline): build
+    its C sources (`src/bitshuffle.c`, `src/bitshuffle_core.c`,
+    `src/iochain.c`, with `-DZSTD_SUPPORT`) against zstd 18d02cbf's
+    `lib/` and its own `lz4/` into
+    `$SLABITZ_DEV_ROOT/toolchains/bitshuffle-0.4.0/libbshuf040.so`. Call
+    `bshuf_compress_zstd` through ctypes, add the filter-32008 chunk
+    header exactly as `src/bshuf_h5filter.c` of 0.4.0 writes it, and store
+    the chunks with h5py `write_direct_chunk` (filter id 32008, the 0.4.0
+    `cd_values`) from the environment's python. This gives the bytes a
+    2022 detector pipeline wrote.
 - **Inputs:**
   - detector images (silicon u16, CeO2 u32 from `SLABITZ_EXAMPLES`,
     cropped);
@@ -77,7 +90,9 @@ input to T09 and T10.
   - streaming: the input through stdin, which writes no FCS;
   - `--no-content-size`, `--check`/`--no-check`;
   - `-B<size>`;
-  - `--patch-from`, and a trained dictionary (expected reject).
+  - `--patch-from`, and a trained dictionary (expected reject; for
+    `--patch-from` the frame has no Dictionary_ID, so the decoder must
+    still reject it, and a silent wrong decode is a FAIL).
 
   A mode the old CLI lacks is recorded as `n/a`, not as a failure.
 - **Classification and runner.** Each file is classified with the T06
@@ -85,6 +100,9 @@ input to T09 and T10.
   expectation (`decode` / `reject:<code>`) and SHA-256 of the decoded
   output.
 - **Runner: `tests/run_compat.py`.**
+  - Every version's files are decoded in a separate subprocess (one GPU
+    fault ends the whole process, T06): a crashed subprocess is a FAIL
+    for its files, and the run goes on.
   - `--full DIR` decodes the whole corpus through
     `sbz_dctx_decompress_frames`, compares with the version's own libzstd
     output and with 1.6.0, and prints a table of version x mode with
@@ -101,13 +119,14 @@ input to T09 and T10.
   Anything else that does not decode is a FAIL: record its reproducer and
   report it. Do not fix the decoder in this task.
 - **Rules.** Do not change `src/`, `kernels/` or `third_party/`. Never
-  read or write outside `$SLABITZ_DEV_ROOT`. Do not run pixi; pip only
-  inside the bitshuffle 0.4.0 venv.
+  read or write outside `$SLABITZ_DEV_ROOT`. Do not run pixi, pip or
+  conda.
 
 ## Files that may change
 
 `tools/gen_compat_corpus.py`, `tests/run_compat.py`,
-`tests/data/compat/*` (5 MB at most), `pixi.toml` (test list),
+`tests/data/compat/*` (5 MB at most), `tests/data/compat_bugs/*`,
+`tools/sbz.sh` (the `sbz test` list),
 `tests/test_suite.py`, `docs/dev/reports/T07.md`.
 
 ## Acceptance
@@ -126,7 +145,11 @@ input to T09 and T10.
    tests/run_compat.py` (subset) passes inside `sbz test`.
 4. The report quotes the zstd 1.6.0 CHANGELOG items relevant to the
    format, with a link to the upstream file, and lists the spec changes
-   between 1.4.7 and 1.6.0 (`doc/zstd_compression_format.md` git log).
+   between 1.4.7 and 1.6.0 (`git -C
+   $SLABITZ_DEV_ROOT/ext/pac-zstd/third_party/zstd log v1.4.7..v1.6.0 --
+   doc/zstd_compression_format.md`; the CHANGELOG is in
+   `toolchains/src/zstd-v1.6.0/CHANGELOG`, upstream
+   https://github.com/facebook/zstd/blob/v1.6.0/CHANGELOG).
 
 ## Reviewer checks
 
