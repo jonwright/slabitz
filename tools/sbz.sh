@@ -127,6 +127,7 @@ build_local() {  # build_local <arch>: slangc + nvcc for every kernel into build
     drop_cache_links
     echo "kernels: building for $arch (source key $(key))"
     CUDA_ARCH="$arch" python3 tools/build_all.py
+    key > build/sbz_source.key   # which sources build/ was generated from (have_local_cu)
 }
 
 publish_arch() {  # publish build/<sub>/<cubin> as <key>/<arch>
@@ -174,7 +175,10 @@ cmd_build() {
     make
 }
 
-have_local_cu() { [ -f build/exec/ExecuteSequences.cu ] && [ -f build/sbz_kernels.id ]; }
+# Generated .cu in build/ from the current sources? Old .cu must never be compiled
+# and published under a new key (cache sets are write-once).
+stamp_current() { [ -f "$1/sbz_source.key" ] && [ "$(cat "$1/sbz_source.key")" = "$(key)" ]; }
+have_local_cu() { [ -f build/exec/ExecuteSequences.cu ] && [ -f build/sbz_kernels.id ] && stamp_current build; }
 
 cmd_build_sm35() {
     require_env
@@ -195,6 +199,7 @@ cmd_build_sm35() {
     # libnvrtc 11.8 finds its libnvrtc-builtins next to itself only through the loader path
     LD_LIBRARY_PATH="$(dirname "$nvrtc")${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         python3 tools/build_kubins.py --arch sm_35 --out build/sm_35 --nvrtc "$nvrtc"
+    cp build/sbz_source.key build/sm_35/sbz_source.key
     if [ "$ROOT_MODE" = 1 ] && [ ! -e "$set" ]; then
         stage="$(stage_dir)"
         while read -r f; do
@@ -220,7 +225,9 @@ cmd_build_fatbins() {
         return 0
     fi
     have_local_cu || build_local "${CUDA_ARCH:-sm_89}"
-    [ -f build/sm_35/sbz_kernels.id ] || cmd_build_sm35
+    # reuse build/sm_35 only if built from the current sources; otherwise
+    # cmd_build_sm35 links the cached set for this key or builds it
+    { [ -f build/sm_35/sbz_kernels.id ] && stamp_current build/sm_35; } || cmd_build_sm35
     if [ -L build/kernels ]; then rm -f build/kernels; fi
     python3 tools/build_fatbins.py
     if [ "$ROOT_MODE" = 1 ] && [ ! -e "$set" ]; then
