@@ -14,7 +14,7 @@ Do the tasks roughly in order. A task may start once the tasks in its
 "Depends on" line are merged. T-1 (the agent root) comes before
 everything: until it is done, agents work as before, in
 `/data/id11/jon/hdftest/slabitz-workspace`. After T05, four tracks can run in parallel:
-correctness (T06-T11), API (T12-T16), performance (T20-T21) and encoder
+correctness (T06-T11), API (T12-T16), performance (T04a, T20-T21) and encoder
 (T17-T19).
 
 | # | Task | Executor | Depends on | Status |
@@ -24,9 +24,10 @@ correctness (T06-T11), API (T12-T16), performance (T20-T21) and encoder
 | T01 | [Kernel argument checks for every Python launcher](T01_kernel_arg_checks.md) | Claude | T-1 | done (e5e8271) |
 | T02 | [Test harness: pytest entry, required data, pac fixtures](T02_test_harness.md) | worker | T01, T00 | done (5437d14) |
 | T03 | [Benchmark regression gate and stored baselines](T03_bench_gate.md) | Claude | T01, T00 | done (85e6f2f) |
-| T04 | [Explain the open performance questions](T04_perf_open_questions.md) | Claude | T03 | review |
+| T04 | [Explain the open performance questions](T04_perf_open_questions.md) | Claude | T03 | done (df4d8f9) |
+| T04a | [ExecuteSequences regression on stock zstd since b840caa](T04a_execseq_stock_regression.md) | Claude | T04 | todo |
 | T05 | [Portable kernels and old cards re-check](T05_old_cards.md) | worker + user (hardware) | T01 | todo |
-| T06 | [zstd feature matrix with proof of coverage, round trips](T06_zstd_feature_matrix.md) | worker | T02 | review |
+| T06 | [zstd feature matrix with proof of coverage, round trips](T06_zstd_feature_matrix.md) | worker | T02 | done (9de040d) |
 | T07 | [zstd version corpus: bitshuffle 0.4.0's zstd to 1.6.0](T07_zstd_version_corpus.md) | worker | T06 | todo |
 | T08 | [pac-zstd: lower the compat floor (other repo)](T08_pac_zstd_floor.md) | worker | - | todo |
 | T09 | [Decoder: matching rejects, error codes, bounds](T09_decoder_rejects_bounds.md) | Claude | T07 | todo |
@@ -40,7 +41,7 @@ correctness (T06-T11), API (T12-T16), performance (T20-T21) and encoder
 | T17 | [Encoder shared stages: GPU bitshuffle and plane-aware parse](T17_encoder_shared_stages.md) | Claude | T03 | todo |
 | T18 | [LZ4 encoder](T18_lz4_encoder.md) | worker (after T17 contracts) | T17 | todo |
 | T19 | [zstd encoder](T19_zstd_encoder.md) | Claude | T18, T07 | todo |
-| T20 | [ExecuteSequences parallelism](T20_execute_sequences_parallel.md) | Claude | T03, T04 | todo |
+| T20 | [ExecuteSequences parallelism](T20_execute_sequences_parallel.md) | Claude | T03, T04, T04a | todo |
 | T21 | [Other decoder performance items](T21_perf_other.md) | Claude | T03 | todo |
 | T22 | [Slang target surveys (CPU, Metal, SPIR-V)](T22_slang_target_surveys.md) | worker | - | todo |
 

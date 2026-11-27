@@ -49,6 +49,14 @@ kernel edits. sm_50 has never been run.
 4. sm_61 (1050 Ti) and sm_50 (960M): the suite with `build/kernels`;
    `run_pac_fixtures.py`; `bench/gate.py` (to make a baseline for that
    card, if the user wants one committed).
+   On the 1050 Ti, also rerun T04 question 1 (`docs/dev/reports/T04.md`):
+   the original "+30% ExecuteSequences" on `silicon_u32_maskmax-1` came
+   from this card and was not reproduced on the L40S. Run the Q1 loop of
+   `bench/t04_runs.sbatch q1q2` (without the Slurm lines) with
+   `wt/t04-at-b840caa`, `wt/t04-at-a0338bf` and this checkout, and with
+   pac-zstd 0.1 and 0.2 frames (rebuild 0.1 first, as described in the
+   T04 report's Method, at `$T04_PAC01`); report the 3 x 2 table of
+   ExecuteSequences us made by `bench/t04_tables.py`.
 5. Fermi: run one test with `build/kernels` and confirm the clean
    `SBZ_ERR_KERNEL` failure message.
 

@@ -255,6 +255,22 @@ output element by element with the reference and the oracle.
     CUDA module loading put ~400 us into profiled first launches, the
     largest cells need an adaptive warmup, and thaumatin u32 zstd exceeds
     the 1 GiB per-call limit.
+32. **Performance questions answered, zstd feature matrix** (2026-11-27, PRs
+    #11-#12). T04 (df4d8f9): the gate learned `SLABITZ_LIB`, so one harness
+    timed four commits and two pac-zstd versions in interleaved rounds. The
+    1050 Ti "+30% ExecuteSequences" was a kernel change and a frame change
+    mixed in single runs (on the L40S, pac 0.2.0 frames are 3.5% faster);
+    CeO2 zstd per-frame time falls with batch size (the old rise was a
+    harness artefact); fused LZ4 is never slower. Two things are real: b840caa
+    made stock zstd ExecuteSequences 8-19% slower on frames with many plane
+    repeats (not the new copy paths, registers or code size: T04a), and
+    stock LZ4 with host input has a host-side cost beyond 16 frames (T21).
+    T06 (9de040d, drafted by the DeepSeek worker, reviewed by Claude):
+    `run_features.py` covers every zstd feature cell with byte-exact decodes
+    of 366 frames, and `run_roundtrip.py` 1362 round trips. Found: a
+    `Dictionary_ID` field of value 0 is rejected by the GPU parser (T09),
+    and a malformed RLE-literals section or a wrong FSE table faults the GPU
+    and poisons the primary context for the rest of the process (T11).
 
 ## Publication snapshot
 
