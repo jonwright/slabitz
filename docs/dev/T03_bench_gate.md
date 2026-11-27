@@ -1,6 +1,6 @@
 # T03: Benchmark regression gate and stored baselines
 
-Status: todo
+Status: review
 Executor: Claude (the harness decides what every later performance claim means)
 Depends on: T01, T00 (synthetic and worst-case cells)
 Branch: `t03-bench-gate`

@@ -32,3 +32,6 @@ bench/run.log
 
 # Local pixi workspace / example data symlink (maintainer layout; never committed)
 /workspace
+
+# Benchmark gate results (bench/gate.py); baselines in bench/baselines/ are committed
+bench/results/
