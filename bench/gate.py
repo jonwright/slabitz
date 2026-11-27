@@ -69,7 +69,10 @@ FRAMES = 16               # frames (chunks) per call
 # with as many whole frames as fit; the cell records its frame count
 ZSTD_MAX_CALL_BYTES = 0x3FFFFFFF
 IDLE_SETTLE_S = 3.0       # before the closing idle check: nvidia-smi utilisation lags
-WARMUP = 2
+WARMUP = 2                # warmup repetitions at least ...
+WARMUP_MAX = 10           # ... and more, up to this many, until two in a row agree within
+WARMUP_STABLE = 0.03      # 3% (the largest cells, 1 GB per call, kept getting faster for
+                          # 5-6 calls: lz4/thaumatin_u32_maskmax-1/sync 18.8 -> 8.5 ms)
 REPS = 9
 ASYNC_CALLS = 4           # one async/device repetition: this many calls, two contexts alternated
 PROFILE_CTXS = 5          # fresh SLABITZ_PROFILE=1 contexts per cell; kernel us = median ...
@@ -466,8 +469,16 @@ class Runner:
         try:
             dcs = self.contexts(mode)
             rep = self.make_call(inp, mode, dcs, dev_src)
-            for _ in range(WARMUP):
-                rep()
+            prev, warm = None, 0
+            while warm < WARMUP_MAX:
+                t = time.perf_counter()
+                k = rep()
+                cur = (time.perf_counter() - t) / k
+                warm += 1
+                if warm >= WARMUP and prev and abs(cur - prev) <= WARMUP_STABLE * prev:
+                    break
+                prev = cur
+            res["warmup"] = warm
             # compared bytes: the output of the warm contexts, against the CPU decode
             res["compared_bytes"] = self.compare(inp, dcs if mode != "sync" else dcs[:1])
             extra = 0.0
@@ -740,7 +751,7 @@ def header(cuda, args):
         host=socket.gethostname(), slurm_node=os.environ.get("SLURMD_NODENAME", ""),
         slurm_job=os.environ.get("SLURM_JOB_ID", ""),
         date=datetime.datetime.now().isoformat(timespec="seconds"),
-        frames_per_call=args.frames, warmup=WARMUP, reps=REPS, async_calls=ASYNC_CALLS,
+        frames_per_call=args.frames, warmup=WARMUP, warmup_max=WARMUP_MAX, reps=REPS, async_calls=ASYNC_CALLS,
         profile_calls=PROFILE_CALLS, profile_contexts=PROFILE_CTXS, pac=pac_version(),
         selftest=os.environ.get("SLABITZ_GATE_SELFTEST", ""),
         cuda_module_loading=os.environ.get("CUDA_MODULE_LOADING", ""),
