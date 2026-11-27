@@ -44,8 +44,13 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import pac_matrix as pm  # noqa: E402
 
-LIB = os.path.join(ROOT, "build", "libslabitz.so")
-KDIR = os.environ.get("SLABITZ_KERNEL_DIR", os.path.join(ROOT, "build"))
+# SLABITZ_LIB=<checkout>/build/libslabitz.so measures another commit's library and kernels
+# with this harness (T04: commits from before the gate; the C API is unchanged since the root
+# commit). The kernel dir then defaults to the library's directory, and the result's "commit"
+# is that checkout's HEAD ("harness_commit" is this one). Not for baselines.
+LIB = os.environ.get("SLABITZ_LIB") or os.path.join(ROOT, "build", "libslabitz.so")
+LIB_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(LIB)))
+KDIR = os.environ.get("SLABITZ_KERNEL_DIR", os.path.dirname(os.path.realpath(LIB)))
 
 # ---- thresholds (docs/dev/T03_bench_gate.md, "Compare") ----
 WALL_SLOWER = 1.05        # wall median more than 5% slower ...
@@ -572,9 +577,9 @@ def parse_profile(text, calls):
 
 # ------------------------------------------------------------------ GPU state
 
-def git(*args):
+def git(*args, root=ROOT):
     try:
-        return subprocess.check_output(["git", "-C", ROOT] + list(args),
+        return subprocess.check_output(["git", "-C", root] + list(args),
                                        stderr=subprocess.DEVNULL).decode().strip()
     except Exception:
         return ""
@@ -745,8 +750,9 @@ def header(cuda, args):
     f["driver"] = drv
     return dict(
         gpu=f, gpu_slug=gpu_slug(f["name"]),
-        commit=git("rev-parse", "HEAD"), commit_dirty=bool(git("status", "--porcelain",
-                                                             "--untracked-files=no")),
+        commit=git("rev-parse", "HEAD", root=LIB_ROOT),
+        commit_dirty=bool(git("status", "--porcelain", "--untracked-files=no", root=LIB_ROOT)),
+        harness_commit=git("rev-parse", "HEAD"), lib=os.path.realpath(LIB),
         kernels_id=kernels_id(), kernel_dir=os.path.realpath(KDIR),
         host=socket.gethostname(), slurm_node=os.environ.get("SLURMD_NODENAME", ""),
         slurm_job=os.environ.get("SLURM_JOB_ID", ""),
@@ -914,6 +920,8 @@ def main():
 
     if a.write_baseline and (a.only or a.frames != FRAMES):
         raise SystemExit("--write-baseline needs the whole matrix at %d frames" % FRAMES)
+    if a.write_baseline and os.environ.get("SLABITZ_LIB"):
+        raise SystemExit("--write-baseline measures this checkout's library, not SLABITZ_LIB")
 
     cuda = Cuda()
     hdr = header(cuda, a)
