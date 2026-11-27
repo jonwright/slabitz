@@ -1,0 +1,27 @@
+case                  pass  claimed property: measured
+random_u8             PASS  incompressible: every zstd block raw: raw 1 compressed 0 rle 0
+random_u16            PASS  incompressible: every zstd block raw: raw 1 compressed 0 rle 0
+random_u32            PASS  incompressible: every zstd block raw: raw 1 compressed 0 rle 0
+random_u64            PASS  incompressible: every zstd block raw: raw 1 compressed 0 rle 0
+zeros                 PASS  zero frame: RLE or tiny blocks: 20 bytes (ratio 0.00031)
+all_max_u16           PASS  every pixel 2^n-1 (masked-detector extreme): 20 bytes (ratio 0.00031)
+all_max_u32           PASS  every pixel 2^n-1 (masked-detector extreme): 22 bytes (ratio 0.00017)
+single_hot_pixel      PASS  one non-zero element in 65536: 27 bytes (ratio 0.00021)
+alternating_planes    PASS  bit planes alternately zero and dense (off=P / off=1 switches): zero planes 0.500
+min_matches           PASS  4-byte matches back to back: the most sequences per block: 31558 sequences, 0.963 of the 4-byte bound 32768
+short_offsets_1_31    PASS  overlapping matches at offsets 1-31 (the DS swizzle loop): offsets 1-31 seen: 31 of 31
+far_offsets           PASS  zstd matches reaching back more than one block: max offset 264144 (block 131072)
+far_offsets_lz4       PASS  LZ4 match at offset 65535 (the maximum): max LZ4 offset 65535
+huffman_max_depth     PASS  Huffman table of the maximum 11 bits: table log 11 (direct weights)
+literals_128k         PASS  one block that is all literals: 131072 Huffman-coded bytes: compressed literals, regen 131072, 4 streams, nseq 0
+fse_max_accuracy      PASS  LL 9, OF 8, ML 9 accuracy logs: LL 9 OF 8 ML 9, 3826 sequences, modes fse/fse/fse
+no_fcs_stream         PASS  streaming frame without Frame_Content_Size (decoder must reject until T09/T10): FCS None (frame content size absent)
+zero_seq_blocks       PASS  compressed blocks with no sequences: raw, RLE, Huffman, treeless literals: 5 compressed blocks, all nseq 0: True; literals compressed,raw,rle,treeless
+tiny_frames           PASS  chunks of 1-7 elements (tail only), every element size: 28 datasets, lengths [1, 2, 3, 4, 5, 6, 7], 420 bytes round-tripped
+many_frames           PASS  1000 chunks of 8 elements each: shapes [(1000, 8)], 48000 bytes round-tripped
+block_tail_mix_lz4    PASS  chunk lengths with every tail 0-7 and a partial last block, every element size: tails [0, 1, 2, 3, 4, 5, 6, 7], 48 of 52 datasets end in a partial block, 572881 bytes round-tripped
+block_tail_mix_zstd2  PASS  chunk lengths with every tail 0-7 and a partial last block, every element size: tails [0, 1, 2, 3, 4, 5, 6, 7], 48 of 52 datasets end in a partial block, 17841617 bytes round-tripped
+exact_128k_block      PASS  compressed block of exactly 131072 bytes (decoder must accept; encoder must avoid): block types/sizes: compressed 131072
+large_frame_16m_u32   PASS  one 16M u32 frame of high dynamic range (large: not in the default set): shape (4362, 4148) max 1481864 (21 bit planes used), 72374304 bytes round-tripped
+
+24 cases, 0 failed

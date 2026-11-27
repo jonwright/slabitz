@@ -1,6 +1,6 @@
 # T00: Synthetic test data, matched to real data, plus worst cases
 
-Status: todo
+Status: review
 Executor: Claude defines the generator models and the matching metrics;
 worker can draft the encoders and the writer once the models are settled.
 Depends on: T-1 (writes into `$SLABITZ_DEV_ROOT/data/synth/`)

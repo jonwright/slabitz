@@ -64,7 +64,7 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | Performance regression gate | none: numbers live in prose, no stored baseline: T03 |
 | Compression | not started; LZ4 then zstd: T17-T19 |
 | Agent environment | each agent sets up pixi and data itself (recurring failures): shared root T-1 |
-| Synthetic data | only small hand-made chunks in `data/`: matched twins and worst cases T00 |
+| Synthetic data | fitted generator `tools/synth` (version 2), twins of the 8 real files, 36 extensions, 24 worst cases in `data/synth/current` (= `v2`); compare 250 of 256 checks pass (6 misses, all accepted by the maintainer: al2o3 x3 as known; hplc class 2-3 and eiger4m_u32 zstd 3 byte split as near enough), GPU decode time of 5 twin/real pairs within 5%; `docs/dev/reports/T00.md`: T00 |
 
 Output lives on the device (`UnCompressedFramesData` / `BshufOutput`);
 `sbz_dctx_read_buffer` copies a named buffer back (also the debug hook for

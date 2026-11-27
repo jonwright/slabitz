@@ -256,6 +256,7 @@ cmd_test() {
     run_t tests/run_bslz4_device.py
     run_t tests/run_unshuffle_slow.py
     run_t tests/run_unshuffle_warp.py
+    run_t tests/run_synth_decode.py
     echo "sbz test: all passed"
 }
 
