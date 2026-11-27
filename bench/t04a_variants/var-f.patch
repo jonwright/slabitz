@@ -1,0 +1,129 @@
+diff --git a/kernels/ExecuteSequences.slang b/kernels/ExecuteSequences.slang
+index 70ae677..8912b86 100644
+--- a/kernels/ExecuteSequences.slang
++++ b/kernels/ExecuteSequences.slang
+@@ -15,6 +15,8 @@
+ void main(StructuredBuffer<uint8_t> inCompressedData,
+           StructuredBuffer<uint8_t> inDecompressedLiterals,
+           RWStructuredBuffer<uint8_t> inoutUnCompressedFramesData,
++          RWStructuredBuffer<uint32_t> inoutUnCompressedFramesData32,
++          RWStructuredBuffer<uint4> inoutUnCompressedFramesData16,
+           StructuredBuffer<zstdgpu_Counters> inCounters,
+           StructuredBuffer<uint32_t> inPerFrameBlockCountCMP,
+           StructuredBuffer<uint32_t> inBlockSizePrefix,
+@@ -43,6 +45,8 @@ void main(StructuredBuffer<uint8_t> inCompressedData,
+     srt.inCompressedData                = inCompressedData;
+     srt.inDecompressedLiterals          = inDecompressedLiterals;
+     srt.inoutUnCompressedFramesData     = inoutUnCompressedFramesData;
++    srt.inoutUnCompressedFramesData32   = inoutUnCompressedFramesData32;
++    srt.inoutUnCompressedFramesData16   = inoutUnCompressedFramesData16;
+     srt.inCounters                      = inCounters;
+     srt.inPerFrameBlockCountCMP         = inPerFrameBlockCountCMP;
+     srt.inBlockSizePrefix               = inBlockSizePrefix;
+diff --git a/src/sbz_chain.c b/src/sbz_chain.c
+index 5edebda..ab8c1ba 100644
+--- a/src/sbz_chain.c
++++ b/src/sbz_chain.c
+@@ -1061,8 +1061,10 @@ static int stage2(sbz_dctx *dc)
+ 
+     /* [Execute Sequences] (one threadgroup per frame). */
+     {
++        const sbz_bind b[] = { { "inoutUnCompressedFramesData32", B_UnCompressedFramesData },
++                               { "inoutUnCompressedFramesData16", B_UnCompressedFramesData } };
+         const sbz_scalar s[] = { { "litCapacity", cntLit }, { "seqCapacity", cntSeq } };
+-        TRY(launch(dc, SBZK_ExecuteSequences, nf, NULL, 0, s, NB(s)));
++        TRY(launch(dc, SBZK_ExecuteSequences, nf, b, NB(b), s, NB(s)));
+     }
+     if (getenv("SLABITZ_DEBUG_SYNC")) BE_TRY(dc->be->ops->sync(dc->be), "chk:Execute");
+ 
+diff --git a/tools/transform_ds_for_slang.py b/tools/transform_ds_for_slang.py
+index d77e522..e142139 100644
+--- a/tools/transform_ds_for_slang.py
++++ b/tools/transform_ds_for_slang.py
+@@ -177,6 +177,71 @@ def patch_match_copy_swizzle(text):
+     return text.replace(MATCH_COPY_SWIZZLE_OLD, MATCH_COPY_SWIZZLE_NEW)
+ 
+ 
++# T04a variant f: 439e2f2 MatchCopy, only the two views added (passed, unused)
++EXEC_VEC_PATCHES = [
++    ("static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> dstData,\n"
++     "                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
++     "static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> dstData,\n"
++     "                              RWStructuredBuffer<uint32_t> dstData32,\n"
++     "                              RWStructuredBuffer<uint4> dstData16,\n"
++     "                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,"),
++    
++    ("static void zstdgpu_ExecuteSequence_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
++     "                                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
++     "static void zstdgpu_ExecuteSequence_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
++     "                                              RWStructuredBuffer<uint32_t> dstData32,\n"
++     "                                              RWStructuredBuffer<uint4> dstData16,\n"
++     "                                              ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,"),
++    ("        zstdgpu_MatchCopy(dstData, dstOfs, seq, dstEnd);",
++     "        zstdgpu_MatchCopy(dstData, dstData32, dstData16, dstOfs, seq, dstEnd);"),
++    ("static void zstdgpu_ExecuteSequencePair_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
++     "                                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,",
++     "static void zstdgpu_ExecuteSequencePair_FusedCopy(RWStructuredBuffer<uint8_t> dstData,\n"
++     "                                                  RWStructuredBuffer<uint32_t> dstData32,\n"
++     "                                                  RWStructuredBuffer<uint4> dstData16,\n"
++     "                                                  ZSTDGPU_PARAM_INOUT(uint32_t) dstOfs,"),
++    ("        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstOfs, litBuf, litOfs, seq0, dstEnd);\n"
++     "        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstOfs, litBuf, litOfs, seq1, dstEnd);",
++     "        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstData32, dstData16, dstOfs, litBuf, litOfs, seq0, dstEnd);\n"
++     "        zstdgpu_ExecuteSequence_FusedCopy(dstData, dstData32, dstData16, dstOfs, litBuf, litOfs, seq1, dstEnd);"),
++    ("            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);",
++     "            zstdgpu_ExecuteSequencePair_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, seq1, dstEnd);"),
++    ("            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, dstOfs, litBuf, litOfs, seq, dstEnd);",
++     "            zstdgpu_ExecuteSequence_FusedCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, dstOfs, litBuf, litOfs, seq, dstEnd);"),
++    ("                zstdgpu_MatchCopy(srt.inoutUnCompressedFramesData, blockByteCur, seq, blockByteEnd);",
++     "                zstdgpu_MatchCopy(srt.inoutUnCompressedFramesData, srt.inoutUnCompressedFramesData32, srt.inoutUnCompressedFramesData16, blockByteCur, seq, blockByteEnd);"),
++]
++
++
++def patch_views_only(text):
++    for idx, (old, new) in enumerate(EXEC_VEC_PATCHES):
++        n = text.count(old)
++        if n != 1:
++            raise SystemExit("EXEC_VEC patch %d: expected 1 match, found %d" % (idx, n))
++        text = text.replace(old, new)
++    return text
++
++
++def patch_execute_sequences_srt(text):
++    """Add 32-bit and 128-bit views of inoutUnCompressedFramesData to ExecuteSequences_SRT."""
++    old = (
++        "    StructuredBuffer<uint8_t>              inDecompressedLiterals;\n"
++        "    RWStructuredBuffer<uint8_t>              inoutUnCompressedFramesData;\n"
++        "    ZSTDGPU_RO_BUFFER(zstdgpu_Counters)                     inCounters;"
++    )
++    new = (
++        "    StructuredBuffer<uint8_t>              inDecompressedLiterals;\n"
++        "    RWStructuredBuffer<uint8_t>              inoutUnCompressedFramesData;\n"
++        "    RWStructuredBuffer<uint32_t>             inoutUnCompressedFramesData32;\n"
++        "    RWStructuredBuffer<uint4>                inoutUnCompressedFramesData16;\n"
++        "    ZSTDGPU_RO_BUFFER(zstdgpu_Counters)                     inCounters;"
++    )
++    n = text.count(old)
++    if n != 1:
++        raise SystemExit("ExecuteSequences_SRT patch: expected 1 match, found %d" % n)
++    return text.replace(old, new)
++
++
+ def strip_dxc_pragmas(text):
+     return re.sub(r"^#pragma dxc.*$", "", text, flags=re.M)
+ 
+@@ -325,9 +390,14 @@ def main(argv=None):
+             print("  typed byte/halfword buffers as native elements:", rel)
+             text = patch_match_copy_swizzle(text)
+             print("  patched MATCH_COPY swizzle uniform trip count:", rel)
++            text = patch_views_only(text)
++            print("  T04a var-f: views passed to MatchCopy:", rel)
+         if rel == "zstdgpu_shared_structs.h" or rel.startswith("srt_headers/"):
+             text = patch_typed_buffer_types(text)
+             print("  typed byte/halfword buffers as native elements:", rel)
++            if rel == "srt_headers/zstdgpu_srt_structs.h":
++                text = patch_execute_sequences_srt(text)
++                print("  added u32/uint4 output views to ExecuteSequences_SRT:", rel)
+         d.write_text(text)
+ 
+     print("Wrote ported tree to", dst)

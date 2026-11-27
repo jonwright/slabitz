@@ -1,0 +1,300 @@
+diff --git a/tools/transform_ds_for_slang.py b/tools/transform_ds_for_slang.py
+index 42b645e..66c929a 100644
+--- a/tools/transform_ds_for_slang.py
++++ b/tools/transform_ds_for_slang.py
+@@ -191,134 +191,113 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
+ {
+     const uint32_t laneCount = WaveGetLaneCount();
+     const uint32_t laneId = WaveGetLaneIndex();
+-    const uint32_t copyLen = zstdgpu_MinU32(dstEnd - zstdgpu_MinU32(dstOfs, dstEnd), seq.mlen);
+-    const bool isOff1 = (seq.offs == 1u) & (copyLen > 0u) & (dstOfs >= 1u);
+ 
+-    // Generic vectorized fill for offset-1 runs (e.g. empty bit-planes in bitshuffle):
+-    // broadcast the single byte read from L1 (no wave intrinsic), then 16-byte aligned uint4 stores.
+-    ZSTDGPU_BRANCH if (isOff1)
+-    {
+-        const uint32_t sym = dstData[dstOfs - 1u];
+-        ZSTDGPU_BRANCH if (copyLen >= 32u)
+-        {
+-            const uint32_t w = (sym & 0xFFu) * 0x01010101u;
+-            const uint4 v4 = uint4(w, w, w, w);
+-            const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
+-            const uint32_t nVecs = (copyLen - head16) >> 4u;
+-            const uint32_t vecBase = (dstOfs + head16) >> 4u;
+-            const uint32_t tailStart = head16 + (nVecs << 4u);
+-            const uint32_t tail16 = copyLen - tailStart;
+-            if (laneId < head16)
+-            {
+-                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, sym);
+-            }
+-            ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
+-            {
+-                dstData16[vecBase + v] = v4;
+-            }
+-            if (laneId < tail16)
+-            {
+-                zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, sym);
+-            }
+-        }
+-        else
+-        {
+-            if (laneId < copyLen)
+-            {
+-                zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, sym);
+-            }
+-        }
+-        dstOfs += copyLen;
+-    }
+-    // When either path could handle the match copy, prefer this one since there is no modulo.
+-    else ZSTDGPU_BRANCH if (seq.offs >= zstdgpu_MinU32(laneCount, seq.mlen))
++    // T04a: ExecuteSequences runs one wave per frame and is latency-bound, so every
++    // dependent instruction in front of the common byte-loop match costs time on stock
++    // zstd. Keep 439e2f2's prologue (no copyLen, no offset-1 test before the branch),
++    // and enter the vector paths only behind a test on seq.offs/seq.mlen alone.
++    ZSTDGPU_BRANCH if (seq.offs >= zstdgpu_MinU32(laneCount, seq.mlen))
+     {
+-        // Generic vectorized aligned match copy (e.g. plane-to-plane repeats where
+-        // offset P is a multiple of 16 or 4). When copyLen > seq.offs, chunk by
+-        // seq.offs so every read stays strictly inside [srcOfs, dstOfs) and
+-        // every write stays in [curDst, curDst + chunk), with no RAW hazard.
+-        const bool canVec = (dstOfs >= seq.offs);
+-        ZSTDGPU_BRANCH if (canVec && copyLen >= 64u && seq.offs >= 64u && (seq.offs & 15u) == 0u)
++        ZSTDGPU_BRANCH if (seq.offs >= 32u && seq.mlen >= 32u && (seq.offs & 3u) == 0u && dstOfs >= seq.offs)
+         {
+-            const uint32_t srcOfs = dstOfs - seq.offs;
+-            const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
+-            const uint32_t srcVecBase = (srcOfs + head16) >> 4u;
+-            uint32_t curDst = dstOfs;
+-            uint32_t rem = copyLen;
+-            ZSTDGPU_LOOP while (rem > 0u)
++            // Generic vectorized aligned match copy (e.g. plane-to-plane repeats where
++            // offset P is a multiple of 16 or 4). When copyLen > seq.offs, chunk by
++            // seq.offs so every read stays strictly inside [srcOfs, dstOfs) and
++            // every write stays in [curDst, curDst + chunk), with no RAW hazard.
++            const uint32_t copyLen = zstdgpu_MinU32(dstEnd - zstdgpu_MinU32(dstOfs, dstEnd), seq.mlen);
++            const bool canVec = true;
++            ZSTDGPU_BRANCH if (canVec && copyLen >= 64u && seq.offs >= 64u && (seq.offs & 15u) == 0u)
+             {
+-                const uint32_t chunk = zstdgpu_MinU32(rem, seq.offs);
+-                ZSTDGPU_BRANCH if (chunk >= head16 + 16u)
++                const uint32_t srcOfs = dstOfs - seq.offs;
++                const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
++                const uint32_t srcVecBase = (srcOfs + head16) >> 4u;
++                uint32_t curDst = dstOfs;
++                uint32_t rem = copyLen;
++                ZSTDGPU_LOOP while (rem > 0u)
+                 {
+-                    const uint32_t nVecs = (chunk - head16) >> 4u;
+-                    const uint32_t dstVecBase = (curDst + head16) >> 4u;
+-                    const uint32_t tailStart = head16 + (nVecs << 4u);
+-                    const uint32_t tail16 = chunk - tailStart;
+-                    if (laneId < head16)
+-                    {
+-                        zstdgpu_TypedStoreU8(dstData, curDst + laneId, dstData[srcOfs + laneId]);
+-                    }
+-                    ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
+-                    {
+-                        dstData16[dstVecBase + v] = dstData16[srcVecBase + v];
+-                    }
+-                    if (laneId < tail16)
++                    const uint32_t chunk = zstdgpu_MinU32(rem, seq.offs);
++                    ZSTDGPU_BRANCH if (chunk >= head16 + 16u)
+                     {
+-                        zstdgpu_TypedStoreU8(dstData, curDst + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
++                        const uint32_t nVecs = (chunk - head16) >> 4u;
++                        const uint32_t dstVecBase = (curDst + head16) >> 4u;
++                        const uint32_t tailStart = head16 + (nVecs << 4u);
++                        const uint32_t tail16 = chunk - tailStart;
++                        if (laneId < head16)
++                        {
++                            zstdgpu_TypedStoreU8(dstData, curDst + laneId, dstData[srcOfs + laneId]);
++                        }
++                        ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
++                        {
++                            dstData16[dstVecBase + v] = dstData16[srcVecBase + v];
++                        }
++                        if (laneId < tail16)
++                        {
++                            zstdgpu_TypedStoreU8(dstData, curDst + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
++                        }
+                     }
+-                }
+-                else
+-                {
+-                    ZSTDGPU_LOOP for (uint32_t i = laneId; i < chunk; i += laneCount)
++                    else
+                     {
+-                        zstdgpu_TypedStoreU8(dstData, curDst + i, dstData[srcOfs + i]);
++                        ZSTDGPU_LOOP for (uint32_t i = laneId; i < chunk; i += laneCount)
++                        {
++                            zstdgpu_TypedStoreU8(dstData, curDst + i, dstData[srcOfs + i]);
++                        }
+                     }
++                    curDst += chunk;
++                    rem -= chunk;
+                 }
+-                curDst += chunk;
+-                rem -= chunk;
++                dstOfs += seq.mlen;
+             }
+-            dstOfs += seq.mlen;
+-        }
+-        else ZSTDGPU_BRANCH if (canVec && copyLen >= 32u && seq.offs >= 32u && (seq.offs & 3u) == 0u)
+-        {
+-            const uint32_t srcOfs = dstOfs - seq.offs;
+-            const uint32_t head4 = (4u - (dstOfs & 3u)) & 3u;
+-            const uint32_t srcWordBase = (srcOfs + head4) >> 2u;
+-            uint32_t curDst = dstOfs;
+-            uint32_t rem = copyLen;
+-            ZSTDGPU_LOOP while (rem > 0u)
++            else ZSTDGPU_BRANCH if (canVec && copyLen >= 32u && seq.offs >= 32u && (seq.offs & 3u) == 0u)
+             {
+-                const uint32_t chunk = zstdgpu_MinU32(rem, seq.offs);
+-                ZSTDGPU_BRANCH if (chunk >= head4 + 4u)
++                const uint32_t srcOfs = dstOfs - seq.offs;
++                const uint32_t head4 = (4u - (dstOfs & 3u)) & 3u;
++                const uint32_t srcWordBase = (srcOfs + head4) >> 2u;
++                uint32_t curDst = dstOfs;
++                uint32_t rem = copyLen;
++                ZSTDGPU_LOOP while (rem > 0u)
+                 {
+-                    const uint32_t nWords = (chunk - head4) >> 2u;
+-                    const uint32_t dstWordBase = (curDst + head4) >> 2u;
+-                    const uint32_t tailStart = head4 + (nWords << 2u);
+-                    const uint32_t tail4 = chunk - tailStart;
+-                    if (laneId < head4)
+-                    {
+-                        zstdgpu_TypedStoreU8(dstData, curDst + laneId, dstData[srcOfs + laneId]);
+-                    }
+-                    ZSTDGPU_LOOP for (uint32_t w = laneId; w < nWords; w += laneCount)
++                    const uint32_t chunk = zstdgpu_MinU32(rem, seq.offs);
++                    ZSTDGPU_BRANCH if (chunk >= head4 + 4u)
+                     {
+-                        dstData32[dstWordBase + w] = dstData32[srcWordBase + w];
++                        const uint32_t nWords = (chunk - head4) >> 2u;
++                        const uint32_t dstWordBase = (curDst + head4) >> 2u;
++                        const uint32_t tailStart = head4 + (nWords << 2u);
++                        const uint32_t tail4 = chunk - tailStart;
++                        if (laneId < head4)
++                        {
++                            zstdgpu_TypedStoreU8(dstData, curDst + laneId, dstData[srcOfs + laneId]);
++                        }
++                        ZSTDGPU_LOOP for (uint32_t w = laneId; w < nWords; w += laneCount)
++                        {
++                            dstData32[dstWordBase + w] = dstData32[srcWordBase + w];
++                        }
++                        if (laneId < tail4)
++                        {
++                            zstdgpu_TypedStoreU8(dstData, curDst + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
++                        }
+                     }
+-                    if (laneId < tail4)
++                    else
+                     {
+-                        zstdgpu_TypedStoreU8(dstData, curDst + tailStart + laneId, dstData[srcOfs + tailStart + laneId]);
++                        ZSTDGPU_LOOP for (uint32_t i = laneId; i < chunk; i += laneCount)
++                        {
++                            zstdgpu_TypedStoreU8(dstData, curDst + i, dstData[srcOfs + i]);
++                        }
+                     }
++                    curDst += chunk;
++                    rem -= chunk;
+                 }
+-                else
++                dstOfs += seq.mlen;
++            }
++            else
++            {
++                uint32_t dstI = dstOfs + laneId;
++                dstOfs += seq.mlen;
++                const uint32_t dstEndC = zstdgpu_MinU32(dstEnd, dstOfs);
++                ZSTDGPU_LOOP for (; dstI < dstEndC; dstI += laneCount)
+                 {
+-                    ZSTDGPU_LOOP for (uint32_t i = laneId; i < chunk; i += laneCount)
+-                    {
+-                        zstdgpu_TypedStoreU8(dstData, curDst + i, dstData[srcOfs + i]);
+-                    }
++                    zstdgpu_TypedStoreU8(dstData, dstI, dstData[dstI - seq.offs]);
+                 }
+-                curDst += chunk;
+-                rem -= chunk;
+             }
+-            dstOfs += seq.mlen;
+         }
+         else
+         {
+@@ -332,23 +311,62 @@ MATCH_COPY_NEW = """static void zstdgpu_MatchCopy(RWStructuredBuffer<uint8_t> ds
+             }
+         }
+     }
+-    else // '1 < seq.offs < seq.mlen && seq.offs < laneCount':
++    else // 'seq.offs < seq.mlen && seq.offs < laneCount':
+     {
+-        uint32_t srcSym = 0;
+-        ZSTDGPU_BRANCH if (laneId < seq.offs)
++        const uint32_t copyLen = zstdgpu_MinU32(dstEnd - zstdgpu_MinU32(dstOfs, dstEnd), seq.mlen);
++        ZSTDGPU_BRANCH if (seq.offs == 1u && dstOfs >= 1u)
+         {
+-            srcSym = dstData[dstOfs + laneId - seq.offs];
++            // Generic vectorized fill for offset-1 runs (e.g. empty bit-planes in bitshuffle):
++            // broadcast the single byte read from L1 (no wave intrinsic), then 16-byte aligned uint4 stores.
++            const uint32_t sym = (copyLen > 0u) ? dstData[dstOfs - 1u] : 0u;
++            ZSTDGPU_BRANCH if (copyLen >= 32u)
++            {
++                const uint32_t w = (sym & 0xFFu) * 0x01010101u;
++                const uint4 v4 = uint4(w, w, w, w);
++                const uint32_t head16 = (16u - (dstOfs & 15u)) & 15u;
++                const uint32_t nVecs = (copyLen - head16) >> 4u;
++                const uint32_t vecBase = (dstOfs + head16) >> 4u;
++                const uint32_t tailStart = head16 + (nVecs << 4u);
++                const uint32_t tail16 = copyLen - tailStart;
++                if (laneId < head16)
++                {
++                    zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, sym);
++                }
++                ZSTDGPU_LOOP for (uint32_t v = laneId; v < nVecs; v += laneCount)
++                {
++                    dstData16[vecBase + v] = v4;
++                }
++                if (laneId < tail16)
++                {
++                    zstdgpu_TypedStoreU8(dstData, dstOfs + tailStart + laneId, sym);
++                }
++            }
++            else
++            {
++                if (laneId < copyLen)
++                {
++                    zstdgpu_TypedStoreU8(dstData, dstOfs + laneId, sym);
++                }
++            }
+         }
+-
+-        // Pad the loop to a uniform trip count so WaveReadLaneAt always runs
+-        // with the whole wave converged (avoids pre-Volta/CUDA mask deadlock).
+-        const uint32_t copyEnd = ((copyLen + laneCount - 1) / laneCount) * laneCount;
+-        for (uint32_t copyId = laneId; copyId < copyEnd; copyId += laneCount)
++        else
+         {
+-            const uint32_t swizzled = WaveReadLaneAt(srcSym, copyId % seq.offs);
+-            if (copyId < copyLen)
++            uint32_t srcSym = 0;
++            ZSTDGPU_BRANCH if (laneId < seq.offs)
+             {
+-                zstdgpu_TypedStoreU8(dstData, dstOfs + copyId, swizzled);
++                srcSym = dstData[dstOfs + laneId - seq.offs];
++            }
++
++            // Pad the loop to a uniform trip count so WaveReadLaneAt always runs
++            // with the whole wave converged (avoids pre-Volta/CUDA mask deadlock).
++            const uint32_t copyEnd = ((copyLen + laneCount - 1) / laneCount) * laneCount;
++            for (uint32_t copyId = laneId; copyId < copyEnd; copyId += laneCount)
++            {
++                const uint32_t swizzled = WaveReadLaneAt(srcSym, copyId % seq.offs);
++                if (copyId < copyLen)
++                {
++                    zstdgpu_TypedStoreU8(dstData, dstOfs + copyId, swizzled);
++                }
+             }
+         }
+         dstOfs += copyLen;
