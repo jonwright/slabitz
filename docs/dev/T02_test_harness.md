@@ -1,6 +1,6 @@
 # T02: Test harness: pytest entry, required data, pac fixtures
 
-Status: review
+Status: done (5437d14)
 Executor: worker (DeepSeek), reviewed by Claude
 Depends on: T01, T00 (its committed subset `tests/data/synth/` joins `sbz test` here)
 Branch: `t02-test-harness`
