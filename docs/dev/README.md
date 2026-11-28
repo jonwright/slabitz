@@ -115,9 +115,10 @@ The reviewer may have no memory of the task. Do not trust the report: rerun.
 4. **Full suite.** Run `CUDA_ARCH=sm_89 sbz test`. Once T01 is merged,
    also run `sbz test-kernels`. Once T03 is merged, and the task touches
    `kernels/`, `src/` or `tools/transform_ds_for_slang.py`, also run the
-   gate on the baseline's node: `sbatch -w $(SLABITZ_GATE_GPU=l40s python3
-   bench/gate.py --baseline-node) bench/gate.sbatch --compare` (log in
-   `$SLABITZ_DEV_ROOT/results/gate-<job>.out`).
+   gate: `sbatch bench/gate.sbatch --compare` on any L40S (log in
+   `$SLABITZ_DEV_ROOT/results/gate-<job>.out`). Add `-w $(SLABITZ_GATE_GPU=l40s
+   python3 bench/gate.py --baseline-node)` for the baseline's node and its
+   tighter wall check.
 5. **Worker drafts.** If the worker drafted the change, the commit message
    says so.
 6. **After merging.** Set Status to `done (<merge commit>)`, add an entry to
