@@ -45,7 +45,7 @@ correctness (T06-T11), API (T12-T16), performance (T04a, T20-T21) and encoder
 | T19 | [zstd encoder](T19_zstd_encoder.md) | Claude | T18, T07 | todo |
 | T20 | [ExecuteSequences parallelism](T20_execute_sequences_parallel.md) | Claude | T03, T04, T04a | todo |
 | T21 | [Other decoder performance items](T21_perf_other.md) | Claude | T03 | todo |
-| T22 | [Slang target surveys (CPU, Metal, SPIR-V)](T22_slang_target_surveys.md) | worker | - | todo |
+| T22 | [Slang target surveys (CPU, Metal, SPIR-V)](T22_slang_target_surveys.md) | worker | - | review |
 
 Executors:
 
