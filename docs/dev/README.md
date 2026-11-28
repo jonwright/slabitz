@@ -31,7 +31,7 @@ correctness (T06-T11), API (T12-T16), performance (T04a, T20-T21) and encoder
 | T07 | [zstd version corpus: bitshuffle 0.4.0's zstd to 1.6.0](T07_zstd_version_corpus.md) | worker | T06 | done (f4ef955) |
 | T08 | [pac-zstd: lower the compat floor (other repo)](T08_pac_zstd_floor.md) | worker | - | todo |
 | T09 | [Decoder: matching rejects, error codes, bounds](T09_decoder_rejects_bounds.md) | Claude | T07 | done (bb081d1) |
-| T10 | [Decoder: frames without a content size](T10_no_fcs_frames.md) | Claude | T09 | todo |
+| T10 | [Decoder: frames without a content size](T10_no_fcs_frames.md) | Claude | T09 | review (bitshuffle chunks; plain .zst streams deferred as part 2) |
 | T11 | [Corrupt compressed blocks on the GPU, compute-sanitizer](T11_gpu_corrupt_sanitizer.md) | worker (fixes: Claude) | T02 | review |
 | T11a | [ExecuteSequences reads past the end of the literals](T11a_literal_overread.md) | Claude | T11 | review |
 | T11b | [GPU faults on corrupt Huffman, FSE and sequence data](T11b_gpu_faults_corrupt_blocks.md) | Claude | T11, T09 | deferred (corrupt input only; after the API tasks) |
