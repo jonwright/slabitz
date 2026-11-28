@@ -637,6 +637,31 @@ def patch_exec_bounds(text):
     return text
 
 
+# T10: frames without Frame_Content_Size. The host supplies every frame's size
+# in UnCompressedFramesRefs (a bitshuffle chunk's block size, or the decoded
+# size on the plain path), and ComputeDestBlockOffsets checks the decoded blocks
+# against it (T09). So the GPU parser no longer rejects such a frame; its
+# header size stays 0 and only feeds the request-size counter, which the host
+# checks itself (host_prepare).
+NO_FCS_PATCHES = [
+    ("    if (0 != (statusFlag & kzstdgpu_FrameStatusFlag_ContentSizeAbsent))\n"
+     "    {\n"
+     "        return kzstdgpu_FrameStatus_MissingContentSize;\n"
+     "    }\n",
+     "    // T10 (slabitz): a missing content size is not an error; the host\n"
+     "    // supplies the frame size (UnCompressedFramesRefs).\n"),
+]
+
+
+def patch_no_fcs(text):
+    for idx, (old, new) in enumerate(NO_FCS_PATCHES):
+        n = text.count(old)
+        if n != 1:
+            raise SystemExit("NO_FCS patch %d: expected 1 match, found %d" % (idx, n))
+        text = text.replace(old, new)
+    return text
+
+
 def strip_dxc_pragmas(text):
     return re.sub(r"^#pragma dxc.*$", "", text, flags=re.M)
 
@@ -787,6 +812,8 @@ def main(argv=None):
             print("  patched MATCH_COPY swizzle uniform trip count:", rel)
             text = patch_exec_bounds(text)
             print("  patched ExecuteSequences frame bounds (T09):", rel)
+            text = patch_no_fcs(text)
+            print("  accepted frames without a content size (T10):", rel)
         if rel == "zstdgpu_shared_structs.h" or rel.startswith("srt_headers/"):
             text = patch_typed_buffer_types(text)
             print("  typed byte/halfword buffers as native elements:", rel)

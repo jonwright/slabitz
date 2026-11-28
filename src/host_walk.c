@@ -234,8 +234,10 @@ static int sbz_ParseFrame(uint32_t frameIndex, sbz_FrameInfo *outFrameInfo, sbz_
                            frameIndex, (unsigned long long)outFrameInfo->windowSize,
                            SBZ_WINDOW_LOG_MAX);
     }
+    /* T10: no Frame_Content_Size is accepted; uncompSize becomes an upper bound
+     * after the block walk and the caller decides (sbz_chain.c host_prepare) */
     if (0 == singleSegmentFlag && 0 == frameContentSizeFlag)
-        return sbz_walk_err(err, SBZ_ERR_UNSUPPORTED, "frame %u: no content size", frameIndex);
+        outFrameInfo->noContentSize = 1;
     blockMax = (uint32_t)(outFrameInfo->windowSize < SBZ_BLOCK_MAX_SIZE ? outFrameInfo->windowSize
                                                                         : SBZ_BLOCK_MAX_SIZE);
 
@@ -301,6 +303,9 @@ static int sbz_ParseFrame(uint32_t frameIndex, sbz_FrameInfo *outFrameInfo, sbz_
 
     outFrameInfo->rawBlockBytesStart = (uint32_t)rawBytesTotal;
     outFrameInfo->rleBlockBytesStart = (uint32_t)rleBytesTotal;
+    if (outFrameInfo->noContentSize)
+        outFrameInfo->uncompSize = rawBytesTotal + rleBytesTotal +
+                                   (uint64_t)outFrameInfo->cmpBlockStart * blockMax;
 
     contentCheckSumFlag = sbz_BitFieldExtractU32(descriptor, 2, 1);
     if (0 != contentCheckSumFlag) {
@@ -452,6 +457,7 @@ int sbz_CollectFrames(sbz_OffsetAndSize *outFrames, sbz_FrameInfo *outFrameInfos
         outFrameInfos[frameId].windowSize = frameInfo.windowSize;
         outFrameInfos[frameId].uncompSize = frameInfo.uncompSize;
         outFrameInfos[frameId].dictionary = frameInfo.dictionary;
+        outFrameInfos[frameId].noContentSize = frameInfo.noContentSize;
         outFrames[frameId].size = sbz_FFBB_Pos(&bits) - outFrames[frameId].offs;
 
         frameInfo.rawBlockStart += outFrameInfos[frameId].rawBlockStart;

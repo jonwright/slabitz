@@ -1,6 +1,6 @@
 # T10: Decoder: frames without a content size
 
-Status: todo
+Status: in-progress (bitshuffle path done; plain zstd path open)
 Executor: Claude (C runtime, device sizing, async path)
 Depends on: T09
 Branch: `t10-no-fcs`

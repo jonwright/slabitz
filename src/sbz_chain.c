@@ -532,8 +532,11 @@ static int check_idle(sbz_dctx *dc)
 /* zstd output per call (kzstdgpu_MaxRequestUncompressedByteSize) */
 #define SBZ_MAX_CALL_OUTPUT 0x3FFFFFFFu
 
+/* expected (may be NULL): per-span decoded size, known to the caller (a bitshuffle
+ * chunk's block size). A frame without Frame_Content_Size takes it as its size
+ * (T10); the GPU then checks the decoded blocks against it (T09 bounds). */
 static int host_prepare(sbz_dctx *dc, const void *src, size_t srcSize,
-                        const sbz_frame_span *spans, uint32_t nspans)
+                        const sbz_frame_span *spans, uint32_t nspans, const uint32_t *expected)
 {
     size_t padded;
     sbz_CountFramesAndBlocksInfo ci;
@@ -632,6 +635,27 @@ static int host_prepare(sbz_dctx *dc, const void *src, size_t srcSize,
         ci.cmpBlockCount = (uint32_t)cmp;
         ci.frameCount = nspans;
         ci.frameByteCount = bytes;
+    }
+    /* T10: a frame without Frame_Content_Size walked with an upper bound as its
+     * size. With an expected size it takes that size; otherwise it is not yet
+     * supported (the plain zstd path). */
+    {
+        uint64_t total = 0;
+        for (i = 0; i < ci.frameCount; ++i) {
+            sbz_FrameInfo *fi = &dc->frame_infos[i];
+            if (fi->noContentSize) {
+                if (!expected)
+                    return fail(dc, SBZ_ERR_UNSUPPORTED, "frame %u: no content size", i);
+                if (expected[i] > fi->uncompSize)
+                    return fail(dc, SBZ_ERR_CORRUPT,
+                                "frame %u: no content size, and its blocks decode to at most %llu "
+                                "bytes, short of the expected %u", i,
+                                (unsigned long long)fi->uncompSize, expected[i]);
+                fi->uncompSize = expected[i];
+            }
+            total += fi->uncompSize;
+        }
+        ci.frameByteCount = total;
     }
     /* The GPU decodes at most kzstdgpu_MaxRequestUncompressedByteSize (0x3FFFFFFF) bytes
      * per call: block output offsets are prefix-summed with 30-bit lookback values.
@@ -1212,7 +1236,7 @@ int sbz_dctx_parse(sbz_dctx *dc, const void *src, size_t srcSize)
         return SBZ_ERR_ARGS;
     dc->err[0] = 0;
     dc->stage_done = -1;
-    TRY(host_prepare(dc, src, srcSize, NULL, 0));
+    TRY(host_prepare(dc, src, srcSize, NULL, 0, NULL));
     dc->exact = 1; /* a debug call: the counters are read after each stage */
     TRY(stage0(dc));
     TRY(stage1(dc));
@@ -1220,7 +1244,8 @@ int sbz_dctx_parse(sbz_dctx *dc, const void *src, size_t srcSize)
 }
 
 static int decompress_frames_internal(sbz_dctx *dc, const void *src, size_t srcSize,
-                                      const sbz_frame_span *frames, uint32_t nframes);
+                                      const sbz_frame_span *frames, uint32_t nframes,
+                                      const uint32_t *expected);
 
 /* A call that may have been queued without the exact checks waits for itself. */
 static int finish(sbz_dctx *dc)
@@ -1238,14 +1263,15 @@ int sbz_dctx_decompress(sbz_dctx *dc, const void *src, size_t srcSize)
     dc->rp_kind = 1;
     dc->rp_src = src;
     dc->rp_size = srcSize;
-    TRY(decompress_frames_internal(dc, src, srcSize, NULL, 0));
+    TRY(decompress_frames_internal(dc, src, srcSize, NULL, 0, NULL));
     return finish(dc);
 }
 
 static int decompress_frames_internal(sbz_dctx *dc, const void *src, size_t srcSize,
-                                      const sbz_frame_span *frames, uint32_t nframes)
+                                      const sbz_frame_span *frames, uint32_t nframes,
+                                      const uint32_t *expected)
 {
-    TRY(host_prepare(dc, src, srcSize, frames, nframes));
+    TRY(host_prepare(dc, src, srcSize, frames, nframes, expected));
     /* exact (readback) mode on a context's first call, on a replay, and on demand;
      * otherwise no host wait before sbz_dctx_wait (P4 step 2b) */
     dc->exact = dc->force_exact || dc->lit_cap == 0 || dc->seq_cap == 0 ||
@@ -1270,7 +1296,7 @@ int sbz_dctx_decompress_frames(sbz_dctx *dc, const void *src, size_t srcSize,
     dc->rp_size = srcSize;
     dc->rp_spans = frames;
     dc->rp_n = nframes;
-    TRY(decompress_frames_internal(dc, src, srcSize, frames, nframes));
+    TRY(decompress_frames_internal(dc, src, srcSize, frames, nframes, NULL));
     return finish(dc);
 }
 
@@ -1775,7 +1801,7 @@ static int bshuf_decode_zstd(sbz_dctx *dc, const void *src, size_t srcSize,
                 pos += 4u + cs;
             }
         }
-        rc = decompress_frames_internal(dc, src, srcSize, spans, (uint32_t)nframesTot);
+        rc = decompress_frames_internal(dc, src, srcSize, spans, (uint32_t)nframesTot, expected);
         if (rc)
             goto out;
         for (fi = 0; fi < nframesTot; ++fi)

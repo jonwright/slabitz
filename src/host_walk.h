@@ -34,6 +34,9 @@ typedef struct sbz_FrameInfo {
     uint32_t cmpBlockStart;
     uint32_t rawBlockBytesStart;
     uint32_t rleBlockBytesStart;
+    /* T10: the frame has no Frame_Content_Size. uncompSize is then an upper
+     * bound: raw bytes + RLE bytes + Block_Maximum_Size per compressed block. */
+    uint32_t noContentSize;
 } sbz_FrameInfo;
 
 typedef struct sbz_CountFramesAndBlocksInfo {
