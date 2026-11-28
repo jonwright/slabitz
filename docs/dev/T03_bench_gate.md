@@ -151,3 +151,19 @@ Nothing in the repository stores a baseline or compares with one.
 ## Out of scope
 
 Making anything faster. T04 explains the open questions using this gate.
+
+## Follow-up decisions (2026-11-28)
+
+The user settled the open gate questions:
+
+- **Threshold:** stays at 20% for kernels (and 20 us).
+- **Nodes:** `--compare` runs on any L40S node; `--any-node` is no longer
+  needed (still accepted). On a node other than the baseline's, the wall
+  limit is +20% (`CROSS_NODE_WALL_SLOWER`) instead of +5% and 3 IQR, because
+  nodes differ by up to 16%, and faster cells are not listed.
+- **Old cards:** correctness only, no timing baselines.
+- **Noisy cells:** a cell over a time limit is measured once more in the
+  same job (`rerun_slow`). The gate fails only if the re-run is also over;
+  both results are kept in the result file (`rerun`). Failures that are not
+  about time (a failed cell, 0 bytes compared, a missing cell) are not
+  re-run.

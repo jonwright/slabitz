@@ -67,6 +67,12 @@ KERNEL_MIN_US = 20.0      # ... and more than 20 us per call slower (the noise r
 # varied by up to 7x between identical runs)
 KERNEL_NOT_GATED = ("alloc", "free", "sync", "total", "upload", "download", "fill32")
 FASTER = 0.95             # improvements listed (refresh the baseline in the same PR)
+# A run on another L40S node than the baseline's (any L40S may run the gate, 2026-11-28): nodes
+# differ by 5-16% in many cells (frcrg-gpu5l40s-01 vs gpbm18-34), so the wall check uses the
+# kernel limit instead of WALL_SLOWER, and "faster" is not reported
+CROSS_NODE_WALL_SLOWER = 1.20
+# A cell over a limit is measured again (--compare); it fails only if the re-run is also over
+RERUN_SLOW = True
 # ---- measurement ----
 FRAMES = 16               # frames (chunks) per call
 # zstd output per call is capped by the decoder (kzstdgpu_MaxRequestUncompressedByteSize,
@@ -778,18 +784,19 @@ def pac_version():
 
 # ------------------------------------------------------------------ compare
 
-def compare(base, now, allow_missing=False, out=sys.stdout, any_node=False):
-    """Prints the table; returns the list of failures (strings)."""
+def compare(base, now, allow_missing=False, out=sys.stdout, slow=None):
+    """Prints the table; returns the list of failures (strings). Cells that failed only on
+    a time limit (wall or kernel) are also appended to `slow` (a list), for a re-run."""
     fails, faster = [], []
     bnode = base.get("slurm_node") or base.get("host")
     nnode = now.get("slurm_node") or now.get("host")
-    if bnode != nnode:
-        # L40S nodes differ by 5-16% in many cells (measured: frcrg-gpu5l40s-01 vs gpbm18-34)
-        msg = "baseline from node %s, this run on node %s: not comparable" % (bnode, nnode)
-        print("WARNING: " + msg + (" (--any-node given)" if any_node else ""), file=out)
-        if not any_node:
-            fails.append(msg + "; run on the baseline node (sbatch -w %s) or pass --any-node"
-                         % bnode)
+    cross = bnode != nnode
+    wall_slower = CROSS_NODE_WALL_SLOWER if cross else WALL_SLOWER
+    if cross:
+        print("NOTE: baseline from node %s, this run on node %s: wall limit +%d%% (same node: "
+              "+%d%% and 3 IQR), faster cells not listed" % (
+                  bnode, nnode, round(100 * (CROSS_NODE_WALL_SLOWER - 1)),
+                  round(100 * (WALL_SLOWER - 1))), file=out)
     bc, nc = base["cells"], now["cells"]
     names = list(bc) + [n for n in nc if n not in bc]
     print("%-48s %10s %10s %7s  %s" % ("cell", "base ms", "now ms", "ratio", "note"), file=out)
@@ -818,12 +825,14 @@ def compare(base, now, allow_missing=False, out=sys.stdout, any_node=False):
             fails.append("%s: compared 0 bytes" % name)
         diff = n["wall_ms"] - b["wall_ms"]
         lim = WALL_IQR_FACTOR * max(b["iqr_ms"], n["iqr_ms"])
-        if ratio > WALL_SLOWER and diff > lim:
+        timed_out = False
+        if ratio > wall_slower and diff > lim:
             notes.append("SLOWER (wall +%.1f%%, %.3f ms > 3 IQR %.3f)" % (
                 100 * (ratio - 1), diff, lim))
             fails.append("%s: wall %.3f -> %.3f ms (x%.3f)" % (name, b["wall_ms"],
                                                                n["wall_ms"], ratio))
-        elif ratio < FASTER:
+            timed_out = True
+        elif ratio < FASTER and not cross:
             notes.append("faster")
             faster.append(name)
         for k, bus in sorted(b.get("kernels_us", {}).items()):
@@ -834,6 +843,9 @@ def compare(base, now, allow_missing=False, out=sys.stdout, any_node=False):
                 notes.append("SLOWER kernel %s %.1f -> %.1f us" % (k, bus, nus))
                 fails.append("%s: kernel %s %.1f -> %.1f us (x%.2f)" % (name, k, bus, nus,
                                                                        nus / bus))
+                timed_out = True
+        if timed_out and slow is not None:
+            slow.append(name)
         print("%-48s %10.3f %10.3f %7.3f  %s" % (name, b["wall_ms"], n["wall_ms"], ratio,
                                                  "; ".join(notes)), file=out)
     if faster:
@@ -875,8 +887,7 @@ def main():
     ap.add_argument("--noise", action="store_true", help="run twice, report run-to-run ratios")
     ap.add_argument("--allow-missing", action="store_true")
     ap.add_argument("--any-node", action="store_true",
-                    help="compare with a baseline made on another node (numbers differ by "
-                         "up to 16%% between L40S nodes)")
+                    help="accepted for old command lines; any L40S node may compare now")
     ap.add_argument("--baseline-node", action="store_true",
                     help="print the node of the baseline (for sbatch -w) and exit")
     ap.add_argument("--force-busy", action="store_true",
@@ -915,7 +926,7 @@ def main():
         base = json.load(open(bpath))
         print("baseline %s (commit %s), now %s (commit %s)" % (
             bpath, base["commit"][:10], a.now, now["commit"][:10]))
-        fails = compare(base, now, a.allow_missing, any_node=a.any_node)
+        fails = compare(base, now, a.allow_missing)
         return report_fails(fails)
 
     if a.write_baseline and (a.only or a.frames != FRAMES):
@@ -985,12 +996,42 @@ def main():
         base = json.load(open(bpath))
         print("\nbaseline %s (commit %s, %s), now commit %s" % (
             bpath, base["commit"][:10], base["date"], hdr["commit"][:10]))
-        rc = report_fails(compare(base, now, a.allow_missing, any_node=a.any_node)) or rc
+        slow = []
+        fails = compare(base, now, a.allow_missing, slow=slow)
+        if slow and RERUN_SLOW:
+            rc = rerun_slow(a, cuda, base, now, slow, path) or rc
+        else:
+            rc = report_fails(fails) or rc
     elif bad and not (a.allow_missing and all(now["cells"][n]["status"] == "missing"
                                               for n in bad)):
         print("cells not ok: %s" % ", ".join(bad))
         rc = rc or 1
     return rc
+
+
+def rerun_slow(a, cuda, base, now, slow, path):
+    """Measures the cells that were over a time limit once more; the gate fails only on
+    cells still over a limit in the re-run (plus every non-time failure of the first run)."""
+    print("\nre-run of %d cell(s) over a time limit: %s" % (len(slow), ", ".join(slow)),
+          flush=True)
+    names = set(slow)
+    again = run_matrix(a, cuda, list(names), passes=1)[0]
+    again = {n: r for n, r in again.items() if n in names}
+    second = dict(now, cells=dict(now["cells"], **again))
+    now["rerun"] = again
+    with open(path, "w") as f:
+        json.dump(now, f, indent=1)
+    import io
+    buf = io.StringIO()
+    fails = compare(base, second, a.allow_missing, out=buf)
+    print("\nre-run cells (they replace their first result):")
+    for line in buf.getvalue().splitlines():
+        if line.startswith("cell ") or line.split(" ", 1)[0] in names:
+            print(line)
+    passed = [n for n in slow if not any(f.startswith(n + ":") for f in fails)]
+    if passed:
+        print("\nwithin the limits on the re-run (noise): %s" % ", ".join(passed))
+    return report_fails(fails)
 
 
 def report_fails(fails):

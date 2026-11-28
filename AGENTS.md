@@ -147,13 +147,17 @@ diffing one stage against `kernels/cpu_ref_*.py`).
   u16/u32 x 2 masks x sync/async/device, plus synthetic twins and worst cases),
   never from the one case a change targets. `--compare` checks a run against
   `bench/baselines/<gpu>.json`; `sbatch bench/gate.sbatch` writes the L40S
-  baseline on an idle GPU. L40S nodes differ by up to 16% in many cells, so
-  a compare runs on the baseline's node (the gate refuses another node unless
-  `--any-node`). Rules:
+  baseline on an idle GPU. A compare may run on any L40S node. L40S nodes
+  differ by up to 16% in many cells, so on a node other than the baseline's
+  the wall limit is +20% (same node: +5% and 3 IQR); kernels are +20% and
+  20 us on any node. A cell over a limit is measured once more and fails
+  only if the re-run is also over (decided 2026-11-28). Old cards (1050 Ti,
+  960M) are checked for correctness only, with no timing baseline. Rules:
   - A PR touching `kernels/`, `src/` or `tools/transform_ds_for_slang.py`
     includes the `--compare` table in its report, from
-    `sbatch -w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node)
-    bench/gate.sbatch --compare`.
+    `sbatch bench/gate.sbatch --compare` (any L40S; the baseline's node,
+    `-w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node)`,
+    gives the tighter wall check).
   - A PR that makes cells faster refreshes the baseline
     (`bench/gate.py --write-baseline` in Slurm) in the same commit.
   - A cell that regresses needs an explicit reason in the report, accepted
