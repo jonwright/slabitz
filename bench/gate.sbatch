@@ -1,10 +1,10 @@
 #!/bin/bash
 # Benchmark gate on an idle L40S (docs/dev/T03_bench_gate.md). Submit from the worktree:
 #   sbatch bench/gate.sbatch                      measure, write the baseline, then --noise
-#   sbatch -w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node) \
-#          bench/gate.sbatch --compare            any gate.py arguments instead; --compare
-#                                                 must run on the baseline's node (L40S nodes
-#                                                 differ by up to 16%), hence -w
+#   sbatch bench/gate.sbatch --compare            any gate.py arguments instead; --compare
+#                                                 runs on any L40S (another node than the
+#                                                 baseline's: wall limit +20%, not +5%); add
+#     -w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node) for the baseline's node
 # The log goes to $SLABITZ_DEV_ROOT/results/gate-<job>.out (results/ when run outside the root
 # needs SLABITZ_DEV_ROOT set; sbatch reads the --output line before this script runs, so the
 # log path is relative to the submit directory: ../../results from wt/<task>).

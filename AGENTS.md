@@ -52,8 +52,8 @@ Run every GPU test under `timeout`: a wave-divergence bug shows up as a hang.
 | `sbz_dctx_bslz4_decompress` (bitshuffle-LZ4 chunks, `kernels/Lz4DecodeBlocks.slang`, fused `kernels/Lz4DecodeUnshuffle.slang` for full blocks of at most 8 kB) | matches hdf5plugin, u8-u64, 8k-256k blocks, tails, corrupt input -> error, fused == unfused; L40S and TITAN Black. Phases 1-3 of `docs/archive/plan_lz4_slang.md` done; plane-aware match copy (runs as fills, plane repeats without a modulo; pac's idea, 3a94af2). L40S, 16 frames/call, device us/frame: silicon 20.4 vs reference 19.6, CeO2 53 vs 67; wall faster than the reference on both (silicon 0.54 ms per 16-frame call, 263 GB/s). `SLABITZ_LZ4_FUSED=0` forces the unfused path |
 | Real pac files (silicon u16, CeO2 u32), 16 frames/call | L40S 41 / 6.5 GB/s; TITAN Black 10 / 2.7 GB/s (`bench/old_cards.py`) |
 | Volta+ (sm_70 and newer) | works (tested on sm_89) |
-| Pre-Volta (sm_35 to sm_61) | works on the sm_35 TITAN Black (check_bshuf 17/17, all per-stage and chain tests) and on the sm_61 GTX 1050 Ti (2026-11-27, commit `bc43e16`, kernel ID `6446e283157f4598`: `run_suite_kernel_dir.sh` 9/9, `run_pac_fixtures.py` 7/7, all 15 `sbz test` scripts pass against `build/kernels`; `run_kernel_scripts.sh` 30/30 pass against `build/`; `docs/dev/reports/T05.md`); TITAN Black and sm_50 pending in T05 |
-| Portable kernels (`pixi run -e kepler build-sm35 && pixi run build-fatbins` -> `build/kernels/`) | one fatbin per kernel: sm_35 (NVRTC 11.8), sm_50..sm_90 (nvcc 12.6), compute_90 PTX; 22 files, 5.4 MB. Rebuilt at `6446e283157f4598` and verified on GTX 1050 Ti (`sm_61`); L40S and TITAN Black re-check pending in T05 |
+| Pre-Volta (sm_35 to sm_61) | works on the sm_35 TITAN Black (check_bshuf 17/17, all per-stage and chain tests) and on the sm_61 GTX 1050 Ti (2026-11-27, commit `bc43e16`, kernel ID `6446e283157f4598`: `run_suite_kernel_dir.sh` 9/9, `run_pac_fixtures.py` 7/7, all 15 `sbz test` scripts pass against `build/kernels`; `run_kernel_scripts.sh` 30/30 pass against `build/`); at kernel ID `4d6567704fd5ebec` (2026-11-28, main `bb081d1`, after T09) the TITAN Black passes the suite with `build/kernels` (9/9), `check_bshuf.py` 17/17 with `build/sm_35` and `run_pac_fixtures.py` 7/7 with both, and the sm_20 Quadro 600 fails cleanly with `SBZ_ERR_KERNEL` (CUresult 209); 1050 Ti rerun at that ID and sm_50 pending (`docs/dev/reports/T05.md`) |
+| Portable kernels (`pixi run -e kepler build-sm35 && pixi run build-fatbins` -> `build/kernels/`) | one fatbin per kernel: sm_35 (NVRTC 11.8), sm_50..sm_90 (nvcc 12.6), compute_90 PTX; 23 files (CheckSequenceOffsets since T09), 5.6 MB. At `4d6567704fd5ebec`: L40S and TITAN Black pass the suite (9/9) and the pac fixtures; the 1050 Ti passed at `6446e283157f4598` (rerun pending, T05) |
 | Other Slang targets (compile only, slangc 2026.22) | Survey 2026-11-28 at 23 kernels: SPIR-V and HLSL 23/23; Metal 17/23 - the same 6 failures as before: `WavePrefixCountBits` has no Metal lowering (PrefixSum, ComputePrefixSum, ParseCompressedBlocks, InitFseTable) and Metal lacks `GetDimensions` (BitUnshuffleSlow, BitUnshuffleWarp; pass byte counts as scalars instead). `BshufWalkChunks` builds for SPIR-V, HLSL and Metal. CPU target (`-target cpp`) compiles 11/23; 12 fail on `error[E36107]` over wave intrinsics (`WaveGetLaneCount` x8, `WaveActiveSum` x1, `WavePrefixSum` x1) and the group barrier (`AllMemoryBarrierWithGroupSync` x2, the 2 LZ4 kernels); groupshared/LDS itself compiles. `docs/dev/reports/T22.md`, `T22_targets.md` |
 | pac-written zstd (local clone of pac-zstd) | done on branch `pac-zstd` (`docs/archive/plan_pac_zstd.md`): verified byte-exact across the 12-case matrix (`bench/pac_matrix.py`: silicon/thaumatin/CeO2 x u16/u32 x mask=0/max-1, 648.9 MB compared) and real zstd files (`tests/run_bshuf_chain.py`). `ExecuteSequences` uses generic `uint4` fills (`off=1`), `uint4`/`uint32` aligned copies (`off=P`), fused short `off=1` fills, and `uint32` literal copies (`maskmax-1` `ExecuteSequences` 3.73x faster on `silicon_u32`); `InitHuffmanTableAndDecompressLiterals` overlaps `GS_PreInit`/`GS_HuffmanTable` (1614 -> 1292 dwords) and uses 1-search table expansion (`Literals` -21% to -24%) |
 | `src/host_walk.c` on corrupt input | bounds-checked: any input -> `SBZ_OK` / `SBZ_ERR_CORRUPT` / `SBZ_ERR_LIMIT` / `SBZ_ERR_UNSUPPORTED` (22 named cases, Block_Maximum_Size = min(window, 128 KiB); ASan/UBSan fuzz, `make build/fuzz_host_walk`, 200k mutants in the test). Compressed-block contents are still trusted by the GPU kernels |
@@ -147,13 +147,17 @@ diffing one stage against `kernels/cpu_ref_*.py`).
   u16/u32 x 2 masks x sync/async/device, plus synthetic twins and worst cases),
   never from the one case a change targets. `--compare` checks a run against
   `bench/baselines/<gpu>.json`; `sbatch bench/gate.sbatch` writes the L40S
-  baseline on an idle GPU. L40S nodes differ by up to 16% in many cells, so
-  a compare runs on the baseline's node (the gate refuses another node unless
-  `--any-node`). Rules:
+  baseline on an idle GPU. A compare may run on any L40S node. L40S nodes
+  differ by up to 16% in many cells, so on a node other than the baseline's
+  the wall limit is +20% (same node: +5% and 3 IQR); kernels are +20% and
+  20 us on any node. A cell over a limit is measured once more and fails
+  only if the re-run is also over (decided 2026-11-28). Old cards (1050 Ti,
+  960M) are checked for correctness only, with no timing baseline. Rules:
   - A PR touching `kernels/`, `src/` or `tools/transform_ds_for_slang.py`
     includes the `--compare` table in its report, from
-    `sbatch -w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node)
-    bench/gate.sbatch --compare`.
+    `sbatch bench/gate.sbatch --compare` (any L40S; the baseline's node,
+    `-w $(SLABITZ_GATE_GPU=l40s python3 bench/gate.py --baseline-node)`,
+    gives the tighter wall check).
   - A PR that makes cells faster refreshes the baseline
     (`bench/gate.py --write-baseline` in Slurm) in the same commit.
   - A cell that regresses needs an explicit reason in the report, accepted
