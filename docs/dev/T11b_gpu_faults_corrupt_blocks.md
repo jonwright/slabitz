@@ -1,6 +1,6 @@
 # T11b: GPU faults on corrupt Huffman, FSE and sequence data
 
-Status: todo
+Status: deferred (corrupt input only; do after T16. See "Check before deferral")
 Executor: Claude (DS transform and kernels; not for the worker)
 Depends on: T11 (`tests/run_gpu_corrupt.py`), T09 (frame bounds and status codes)
 Branch: `t11b-gpu-faults`
@@ -40,6 +40,26 @@ fault ends the process's use of the GPU (primary context).
 
   An out-of-range value indexes past a table or a stream. T09's bounds cover
   only the output ranges and match offsets.
+
+## Check before deferral (2026-11-28)
+
+The user deferred T11b: corrupt input is rare in practice and the fix is
+costly. Before deferring, each committed reproducer was replayed once under
+`SLABITZ_DEBUG_SYNC=1 compute-sanitizer --tool memcheck --print-limit 10000`
+(L40S, branch `t11a-literal-overread`, be43864). Each case has exactly one
+memory violation, and it is a read; the other errors in the summary are
+probably the 719 failure reported again by later API calls (not checked):
+
+| reproducer | stage | violation |
+|---|---|---|
+| `gpu-fault-1.bin` | `chk:Sequences` | global read, 4 bytes, 14.7 GB past a 512-byte allocation (a wild index) |
+| `gpu-fault-2.bin` | `chk:Literals` | 2x shared read, 4 bytes, address 0xffff9e98/0xffff9ea8 (negative shared index) |
+| `gpu-fault-10.bin` | stage 1, `readback Counters` | global read, 4 bytes, 27369 bytes past a 4-byte allocation |
+
+So no out-of-bounds write was observed. The kernel stops at its first fault,
+so a write later in the same kernel cannot be ruled out, and the other 8
+fuzz faults were not checked. Not mapped to source (nvdisasm): that stays
+part of this task. The limit is recorded in `AGENTS.md` (known limits).
 
 ## Settled design
 

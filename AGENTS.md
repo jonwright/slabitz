@@ -209,8 +209,12 @@ size, a block over 128 KiB, and a match reaching before its frame's start
 such blocks are not written, so neighbours stay intact. Other
 compressed-block contents (Huffman, FSE, literals sections) are still
 trusted by the kernels: T11's fuzz (`tests/run_gpu_corrupt.py`, slow) finds
-11 GPU faults in 2008 corrupt inputs [T11b]; ExecuteSequences reads up to 63
-bytes past the literals of valid frames (memcheck) [T11a].
+11 GPU faults in 2008 corrupt inputs [T11b, deferred]. A fault is a CUDA
+illegal-address error (719): the call fails and the process can no longer
+use the GPU (primary context). The three committed reproducers each fault on
+an out-of-bounds read (memcheck, 2026-11-28); no write was seen, but the
+kernel stops at the first fault, so that is not a proof. Do not decode
+untrusted data. Valid frames are memcheck-clean since T11a (literal slack).
 
 Out of scope for v1: dictionaries (rejected, UNSUPPORTED), GPU checksum verification
 (checksums are skipped). Compression is planned (T17-T19: LZ4 first, then
