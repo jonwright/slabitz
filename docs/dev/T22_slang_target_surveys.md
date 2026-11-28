@@ -1,6 +1,6 @@
 # T22: Slang target surveys (CPU, Metal, SPIR-V), compile only
 
-Status: todo
+Status: review
 Executor: worker (DeepSeek), reviewed by Claude
 Depends on: - (rerun after T17-T19 add kernels)
 Branch: `t22-slang-surveys`
