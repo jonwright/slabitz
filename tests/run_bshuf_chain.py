@@ -60,6 +60,8 @@ def load():
                                              ct.POINTER(Span), ct.c_uint32, ct.c_uint32]
     lib.sbz_dctx_read_buffer.argtypes = [ct.c_void_p, ct.c_char_p, ct.c_void_p,
                                         ct.POINTER(ct.c_size_t)]
+    lib.sbz_dctx_bshuf_decompress_async.argtypes = lib.sbz_dctx_bshuf_decompress.argtypes
+    lib.sbz_dctx_wait.argtypes = [ct.c_void_p]
     return lib
 
 
@@ -325,6 +327,95 @@ def run_h5(path, frames):
             lib.sbz_dctx_destroy(dc)
 
 
+def recompress_chunk(chunk, e, how):
+    """T10: rewrite a bitshuffle-zstd chunk's frames without Frame_Content_Size.
+
+    how(i, content) returns (content to compress, drop the FCS?) for frame i.
+    The chunk header, the frame count and the raw tail are kept."""
+    import zstandard as zstd
+    total = struct.unpack_from(">Q", chunk, 0)[0]
+    bbytes = struct.unpack_from(">I", chunk, 8)[0]
+    nelem, belem = total // e, bbytes // e
+    left = nelem % belem
+    nframes = nelem // belem + (1 if left - left % 8 else 0)
+    with_fcs = zstd.ZstdCompressor(level=3)
+    no_fcs = zstd.ZstdCompressor(level=3, write_content_size=False)
+    out, pos = [bytes(chunk[:12])], 12
+    for i in range(nframes):
+        cs = struct.unpack_from(">I", chunk, pos)[0]
+        frame = bytes(chunk[pos + 4:pos + 4 + cs])
+        pos += 4 + cs
+        content = zstd.ZstdDecompressor().decompress(frame)
+        content, drop = how(i, content)
+        fr = (no_fcs if drop else with_fcs).compress(content)
+        if drop:
+            assert fr[4] & 0xE0 == 0, "frame %d still has a content size" % i
+        out.append(struct.pack(">I", len(fr)) + fr)
+    out.append(bytes(chunk[pos:]))
+    return b"".join(out), nframes
+
+
+NOFCS_CASES = {
+    # case: (how, expect success)
+    "all": (lambda i, c: (c, True), True),
+    "mixed": (lambda i, c: (c, i % 2 == 1), True),
+    "longer": (lambda i, c: (c + c[:16] if i == 1 else c, i == 1), False),
+    "shorter": (lambda i, c: (c[:-16] if i == 1 else c, i == 1), False),
+}
+
+
+def run_nofcs(case):
+    """T10: frames without Frame_Content_Size inside bitshuffle chunks. Valid ones
+    decode byte-exact (sync on a fresh context, which runs exact, then async, which
+    does not); a frame decoding longer or shorter than its block is CORRUPT."""
+    import numpy as np
+    how, good = NOFCS_CASES[case]
+    spec = SPECS[0]  # u16-default: 8 kB blocks, many frames per chunk
+    with tempfile.TemporaryDirectory(dir=os.path.join(ROOT, "build")) as td:
+        (entry,) = make_h5([spec], td)
+        _, dt, raw, ref, csz, n = entry
+        e = np.dtype(dt).itemsize
+        data, nframes = recompress_chunk(raw[0], e, how)
+        lib = load()
+        err = ct.create_string_buffer(512)
+        dc = lib.sbz_dctx_create_cuda(0, KDIR.encode(), err, len(err))
+        if not dc:
+            print("FAIL nofcs %s: create: %s" % (case, err.value.decode()))
+            return 1
+        try:
+            arr = (Span * 1)(Span(0, len(data)))
+            if not good:
+                rc = lib.sbz_dctx_bshuf_decompress(dc, data, len(data), arr, 1, e)
+                msg = lib.sbz_dctx_error(dc).decode()
+                if rc != SBZ_ERR_CORRUPT:
+                    print("FAIL nofcs %s: rc=%d (want CORRUPT): %s" % (case, rc, msg))
+                    return 1
+                if decode(lib, dc, raw, e) != 0 or not buf_eq(read_buf(lib, dc, "BshufOutput"), ref):
+                    print("FAIL nofcs %s: context broken after the error" % case)
+                    return 1
+                print("ok   nofcs %s (rc=%d %s)" % (case, rc, msg))
+                return 0
+            for mode in ("sync", "async"):
+                fn = (lib.sbz_dctx_bshuf_decompress if mode == "sync"
+                      else lib.sbz_dctx_bshuf_decompress_async)
+                rc = fn(dc, data, len(data), arr, 1, e)
+                if rc == 0 and mode == "async":
+                    rc = lib.sbz_dctx_wait(dc)
+                if rc != 0:
+                    print("FAIL nofcs %s %s: rc=%d: %s"
+                          % (case, mode, rc, lib.sbz_dctx_error(dc).decode()))
+                    return 1
+                got = read_buf(lib, dc, "BshufOutput")
+                if not buf_eq(got, ref) or not any(ref):
+                    print("FAIL nofcs %s %s: mismatch" % (case, mode))
+                    return 1
+            print("ok   nofcs %s (%d frames, chunk %d -> %d B, sync and async match h5py)"
+                  % (case, nframes, len(raw[0]), len(data)))
+            return 0
+        finally:
+            lib.sbz_dctx_destroy(dc)
+
+
 def main():
     argv = sys.argv[1:]
     if argv and argv[0] == "--h5":
@@ -340,6 +431,8 @@ def main():
         return run_multi(argv[1])
     if len(argv) == 2 and argv[0] == "--corrupt":
         return run_corrupt(argv[1])
+    if len(argv) == 2 and argv[0] == "--nofcs":
+        return run_nofcs(argv[1])
     subprocess.run(["make", "-s", "-C", ROOT], check=True)
     bad = 0
     for name, *_ in SPECS:
@@ -361,6 +454,13 @@ def main():
             bad += r.returncode != 0
         except subprocess.TimeoutExpired:
             print("FAIL corrupt %s: timeout (%ds) -- GPU hang?" % (case, TIMEOUT))
+            bad += 1
+    for case in NOFCS_CASES:
+        try:
+            r = subprocess.run([sys.executable, __file__, "--nofcs", case], timeout=TIMEOUT)
+            bad += r.returncode != 0
+        except subprocess.TimeoutExpired:
+            print("FAIL nofcs %s: timeout (%ds) -- GPU hang?" % (case, TIMEOUT))
             bad += 1
     examples = os.environ.get("SLABITZ_EXAMPLES") or os.path.join(ROOT, "workspace", "examples")
     paths = []

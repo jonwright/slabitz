@@ -1,6 +1,7 @@
 # T10: Decoder: frames without a content size
 
-Status: todo
+Status: review for part 1, bitshuffle chunks (`docs/dev/reports/T10.md`); part 2,
+the plain zstd path, deferred (user, 2026-11-28: HDF5 chunks first)
 Executor: Claude (C runtime, device sizing, async path)
 Depends on: T09
 Branch: `t10-no-fcs`
@@ -39,6 +40,17 @@ these frames are rejected with UNSUPPORTED "no content size".
 `kernels/ComputeDestBlockOffsets.slang`; the DS code that fills
 `inBlockSizePrefix` and `UnCompressedFramesRefs`; `src/host_walk.c`;
 `docs/archive/p4_readback_audit.md` (sections 2-4).
+
+## Split (2026-11-28)
+
+- **Part 1, done:** the bitshuffle path below.
+- **Part 2, deferred:** the plain zstd path (`sbz_dctx_decompress`,
+  `sbz_dctx_decompress_frames`), its `sbz_dctx_frame_sizes`, the run_compat
+  no-FCS cells, and the mixed-batch test. The user is focused on HDF5 chunks;
+  standalone `.zst` streams wait. Part 1 already provides what part 2 starts
+  from:
+  - the host walk's per-frame upper bound (`sbz_FrameInfo.noContentSize`);
+  - the GPU parser accepting the frame.
 
 ## Settled design
 

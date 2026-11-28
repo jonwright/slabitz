@@ -200,7 +200,9 @@ reused across calls.
 
 Known limits (tasks that change them in brackets). Rejected before any GPU
 work with `SBZ_ERR_UNSUPPORTED` (T09): frames without Frame_Content_Size
-[T10 support], a window of 2^29 bytes or more (kept: the GPU packs offsets
+in plain zstd input (`sbz_dctx_decompress`, `_frames`) [T10 part 2,
+deferred; inside bitshuffle-zstd chunks they decode since T10, sized from
+the chunk's block size], a window of 2^29 bytes or more (kept: the GPU packs offsets
 in 29 bits), any Dictionary_ID field (value 0 too). More than 1 GiB of zstd
 output per call returns `SBZ_ERR_LIMIT` (the DS request limit; callers
 split). On the GPU (T09), a frame that decodes past or short of its content
